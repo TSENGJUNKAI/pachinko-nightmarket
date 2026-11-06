@@ -1,7 +1,7 @@
 // 導演：拿到已決定好的結果，排出整段演出的節奏。
 // 想調「什麼時候緊張、停多久」都在這裡。
 import gsap from 'gsap';
-import { CONFIG, type JiaoResult, type Outcome, type Tier } from './outcome';
+import type { JiaoResult, Outcome, Tier } from './outcome';
 import { HEIGHT, IDLE_AGONG, WIDTH, wait, type LightMode, type Stage } from './stage';
 import type { AudioKit } from './audio';
 import type { BurstLook } from './fx';
@@ -67,6 +67,7 @@ export class Director {
       this.onBossHit(hit);
       this.onSeen(hit === 'final' ? 'temple' : 'chain');
     };
+    this.rush.onEnterRush = () => this.onSeen('rush');
   }
 
   async run(outcome: Outcome) {
@@ -368,89 +369,13 @@ export class Director {
     await wait(1.5);
 
     audio.music('jackpot');
-    const stopParty = this.startParty();
-    const round = Math.round(CONFIG.ballsPerRound * this.payoutScale);
-    const counter = stage.bigText('出珠 0', 'gold', { size: 96, y: 900, hold: null, outline: 0.8 });
-    await this.countBalls(0, round, 2.6, (value) => this.replaceCounter(counter, value));
-    this.dropCounter();
-    stopParty();
-    this.onSeen('rush');
-
-    const rush: RushResult = await this.rush.play(outcome.rush ?? { hitSpins: [], reachedFinal: false }, round, this.payoutScale);
+    const rush: RushResult = await this.rush.play(outcome.rush ?? { hitSpins: [], reachedFinal: false }, this.payoutScale);
 
     this.onStats({ win: 1, balls: rush.totalBalls, chain: rush.hits + 1, reachedFinal: rush.reachedFinal });
     this.resetLights();
     this.onTakeover(false);
     audio.music('idle');
     stage.lightMode = 'idle';
-  }
-
-  private currentCounter: ReturnType<Stage['bigText']> | null = null;
-
-  private replaceCounter(first: ReturnType<Stage['bigText']>, value: number) {
-    const { stage } = this;
-    const previous = this.currentCounter ?? first;
-    previous.killMotion();
-    previous.destroy({ children: true });
-    const label = stage.bigText(`出珠 ${value.toLocaleString()}`, 'gold', { size: 96, y: 900, hold: null, outline: 0.8 });
-    label.killMotion();
-    label.alpha = 1;
-    label.scale.set(label.fitScale);
-    this.currentCounter = label;
-  }
-
-  private dropCounter() {
-    if (this.currentCounter && !this.currentCounter.destroyed) {
-      this.currentCounter.killMotion();
-      this.currentCounter.destroy({ children: true });
-    }
-    this.currentCounter = null;
-  }
-
-  private countBalls(from: number, to: number, seconds: number, onValue: (value: number) => void) {
-    return new Promise<void>((resolve) => {
-      const counter = { value: from };
-      let lastShown = -1;
-      // 大約跳 40 次，避免頻繁重畫大字。
-      const step = Math.max(50, Math.ceil(to / 40 / 50) * 50);
-      gsap.to(counter, {
-        value: to,
-        duration: seconds,
-        ease: 'none',
-        onUpdate: () => {
-          const shown = Math.floor(counter.value / step) * step;
-          if (shown !== lastShown) {
-            lastShown = shown;
-            onValue(shown);
-          }
-        },
-        onComplete: () => {
-          onValue(to);
-          resolve();
-        },
-      });
-    });
-  }
-
-  private startParty() {
-    const { stage, audio } = this;
-    let running = true;
-    const firework = () => {
-      if (!running) return;
-      stage.sparks(70 + Math.random() * (WIDTH - 140), 130 + Math.random() * 300, 60, FESTIVE, 460);
-      gsap.delayedCall(0.5 + Math.random() * 0.4, firework);
-    };
-    const balls = () => {
-      if (!running) return;
-      stage.ballRain(7);
-      audio.ballPing();
-      gsap.delayedCall(0.09, balls);
-    };
-    firework();
-    balls();
-    return () => {
-      running = false;
-    };
   }
 
   private async loss() {

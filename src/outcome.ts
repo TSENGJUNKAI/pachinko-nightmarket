@@ -72,6 +72,14 @@ export const CONFIG = {
   },
 } as const;
 
+// 大開口：打開 5 回合，每回合最多進 10 顆，全進剛好拿滿那一次的出珠。
+export const ATTACKER = { rounds: 5, ballsPerRound: 10, secondsPerRound: 10 } as const;
+
+export function attackerPayout(total: number, entered: number) {
+  const capacity = ATTACKER.rounds * ATTACKER.ballsPerRound;
+  return Math.round((total * Math.min(entered, capacity)) / capacity);
+}
+
 const mod = (n: number, m: number) => ((n % m) + m) % m;
 
 function pickWeighted(weights: Record<string, number>, rng: Rng): string {

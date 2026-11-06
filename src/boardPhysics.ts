@@ -231,6 +231,43 @@ export function pegLayout(id: MachineId): Point[] {
   return LAYOUTS[id]();
 }
 
+// 右打區：大獎和 RUSH 才出現。珠子走右側通道，沿斜道先經過電動門，再滾到大開口。
+export const RUSH_FIELD = {
+  // 右側導軌延伸出去的斜道，中間的洞就是電動門。
+  rampA: { x1: 570, y1: 626, x2: 540, y2: 637 },
+  gateLid: { x1: 540, y1: 637, x2: 488, y2: 656 },
+  gateStop: { x1: 488, y1: 630, x2: 488, y2: 674 },
+  rampB: { x1: 488, y1: 656, x2: 462, y2: 666 },
+  wall: { x1: 428, y1: 650, x2: 428, y2: 696 },
+  rampC: { x1: 428, y1: 688, x2: 560, y2: 737 },
+  doorLid: { x1: 560, y1: 737, x2: 640, y2: 767 },
+  doorStop: { x1: 644, y1: 716, x2: 644, y2: 792 },
+  gate: { x: 514, y: 674, width: 50 },
+  attacker: { x: 600, y: 790, width: 88 },
+  plate: { x: BOARD.lcd.left, y: BOARD.lcd.top, width: BOARD.lcd.right - BOARD.lcd.left, height: BOARD.lcd.bottom - BOARD.lcd.top },
+};
+
+type Segment = { x1: number; y1: number; x2: number; y2: number };
+const segmentBody = ({ x1, y1, x2, y2 }: Segment) => slope(x1, y1, x2, y2);
+
+export function buildRushBodies() {
+  const { rampA, rampB, wall, rampC, gateLid, gateStop, doorLid, doorStop, gate, attacker } = RUSH_FIELD;
+  return {
+    fixed: [rampA, rampB, wall, rampC].map(segmentBody),
+    gateLid: segmentBody(gateLid),
+    gateStop: segmentBody(gateStop),
+    doorLid: segmentBody(doorLid),
+    doorStop: segmentBody(doorStop),
+    gateSensor: Bodies.rectangle(gate.x, gate.y, gate.width, 12, { isStatic: true, isSensor: true, label: 'gate' }),
+    attackerSensor: Bodies.rectangle(attacker.x, attacker.y, attacker.width, 12, { isStatic: true, isSensor: true, label: 'attacker' }),
+  };
+}
+
+// 右打區要騰出空間，那一帶的釘子拿掉。
+export function rushPegLayout(id: MachineId): Point[] {
+  return pegLayout(id).filter(({ x, y }) => !(x > 405 && y >= 560));
+}
+
 // 物理引擎的緩坡上珠子會爬得極慢，屋頂上要再推一把才像真的滾下去。
 export function assistRoof(body: Matter.Body) {
   const { lcd, pocket } = BOARD;

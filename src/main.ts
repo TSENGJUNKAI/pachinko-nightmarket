@@ -170,7 +170,7 @@ function renderHud() {
   el('stat-rent').textContent = moneyText(rent);
   el('stat-level').textContent = String(run.level);
   el('night-mods').textContent = [machine().name, ...(run.today ? [FORTUNES[run.today.fortune].rank, describeMods(run.today.mods)] : [])].join('｜');
-  const canAct = phase === 'night' && !closing;
+  const canAct = phase === 'night' && !closing && !director.rush.active;
   el('buy-cost').textContent = `−${moneyText(Math.ceil(ballPrice(run.night) * mods().price) * ECONOMY.buyBalls)} 元`;
   buyButton.disabled = !canAct || buyBalls(run.cash, run.night, mods().price).balls === 0;
   closeButton.disabled = !canAct;
@@ -179,14 +179,21 @@ function renderHud() {
   closeButton.classList.toggle('danger', closeArmed);
 }
 
-function setRushControls(active: boolean) {
-  document.body.classList.toggle('rush', active);
-  fireLabel.textContent = active ? '敲鑼！' : '發射！';
-  fireHint.textContent = active ? '外圈縮到鑼邊時按' : '按住連發・空白鍵';
+function setFireText(label: string, hint: string) {
+  fireLabel.textContent = label;
+  fireHint.textContent = hint;
 }
 
-// 發射：按住會連發，真實機台約每 0.6 秒一顆。
+function setRushControls(active: boolean) {
+  document.body.classList.toggle('rush', active);
+  if (!active) setFireText('發射！', '按住連發・空白鍵');
+}
+
+// 發射：按住會連發，真實機台約每 0.6 秒一顆。大獎和 RUSH 時打快一點。
 const FIRE_INTERVAL = 0.6;
+const RUSH_FIRE_INTERVAL = 0.32;
+// 力道低於這個值，珠子大多落在左邊，打不到右打區。
+const RIGHT_POWER = 0.35;
 let firing = false;
 let fireTimer = 0;
 
@@ -216,13 +223,18 @@ const director = new Director(
   (active) => {
     setRushControls(active);
     stage.bossBar.setRush(active);
+    stopFiring();
+    if (active) stage.board.paused = false;
+    else stage.setHoldLamps(queue.length);
     updateFireButton();
+    renderHud();
   },
   setTakeover,
 );
 
 director.onBossHit = hitBoss;
 director.onSeen = seen;
+director.rush.onFireText = setFireText;
 
 // 保留：進洞的珠子排隊，最多 4 顆，一次演一個結果。
 const MAX_HOLD = 4;
@@ -242,6 +254,8 @@ async function runQueue() {
 }
 
 stage.board.onPocket = (force) => {
+  // 大獎和 RUSH 中打珠不扣珠，打到中間洞也不算。
+  if (director.rush.active) return;
   balls += ECONOMY.entryBalls;
   renderHud();
   if (queue.length >= MAX_HOLD) return;
@@ -258,7 +272,18 @@ function beginClosing() {
   renderHud();
 }
 
+function shootRush() {
+  if (!director.rush.canShoot) return;
+  const power = Number(powerInput.value) / 100;
+  stage.board.launch(power);
+  if (power < RIGHT_POWER) director.rush.hintRight();
+}
+
 function shoot() {
+  if (director.rush.active) {
+    shootRush();
+    return;
+  }
   if (phase !== 'night' || closing) return;
   if (balls <= 0) {
     stopFiring();
@@ -291,7 +316,7 @@ stage.onUpdate = (delta) => {
   if (closing && !running && !queue.length && stage.board.ballCount === 0) finishNight();
   if (!firing || stage.board.paused) return;
   fireTimer += delta;
-  if (fireTimer >= FIRE_INTERVAL) {
+  if (fireTimer >= (director.rush.active ? RUSH_FIRE_INTERVAL : FIRE_INTERVAL)) {
     fireTimer = 0;
     shoot();
   }
@@ -637,6 +662,7 @@ function pressDown() {
   audio.unlock();
   if (director.rush.active) {
     director.rush.press();
+    startFiring();
     return;
   }
   if (stage.board.paused || phase !== 'night' || closing) return;

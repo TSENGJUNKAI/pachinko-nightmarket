@@ -218,6 +218,11 @@ export class Stage {
     this.lanterns = bg.lanterns;
     this.world.addChild(bg.root);
 
+    // 遶境的街景在釘盤後面，RUSH 時才看得到珠子。
+    this.street = new ParadeStreet(this.art, WIDTH, HEIGHT);
+    this.street.visible = false;
+    this.world.addChild(this.street);
+
     this.board = new Board(audio, this.art);
     this.buildTray();
     this.world.addChild(this.board.root, this.tray);
@@ -228,12 +233,10 @@ export class Stage {
 
     this.temple = makeTempleScene(this.art, WIDTH, HEIGHT);
     this.temple.visible = false;
-    this.street = new ParadeStreet(this.art, WIDTH, HEIGHT);
-    this.street.visible = false;
-    this.runner = new Runner(this.art.poses.run, 560);
-    this.runner.position.set(WIDTH / 2 - 20, 1000);
+    this.runner = new Runner(this.art.poses.run, IDLE_AGONG.height);
+    this.runner.position.set(IDLE_AGONG.x, IDLE_AGONG.y);
     this.runner.visible = false;
-    this.world.addChild(this.temple, this.street, this.runner, this.burst);
+    this.world.addChild(this.temple, this.runner, this.burst);
 
     this.buildMachine(audio);
     this.world.addChild(this.machine);

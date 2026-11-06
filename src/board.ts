@@ -4,7 +4,8 @@ import gsap from 'gsap';
 import Matter from 'matter-js';
 import type { ArtBook } from './art';
 import type { AudioKit } from './audio';
-import { assistRoof, BALL_OPTIONS, BALL_RADIUS, BALL_SIDES, BOARD, GRAVITY, GUIDES, PEG_RADIUS, STEP, buildPegBodies, buildSensors, buildStatics, isStill, nudge, pegLayout, railPoint, releaseFor, stillAction } from './boardPhysics';
+import { assistRoof, BALL_OPTIONS, BALL_RADIUS, BALL_SIDES, BOARD, GRAVITY, GUIDES, PEG_RADIUS, RUSH_FIELD, STEP, buildPegBodies, buildRushBodies, buildSensors, buildStatics, isStill, nudge, pegLayout, railPoint, releaseFor, rushPegLayout, stillAction } from './boardPhysics';
+import { makeText } from './art';
 import type { MachineId } from './machines';
 
 const { Bodies, Body, Composite, Engine, Events } = Matter;
@@ -28,6 +29,9 @@ export class Board {
   readonly root = new Container();
   // 珠子真的進洞時呼叫，參數是演出測試指定的結果（平常為空字串）。
   onPocket: (force: string) => void = () => undefined;
+  // 右打區：珠子進電動門和大開口時呼叫。
+  onGate: () => void = () => undefined;
+  onAttacker: () => void = () => undefined;
   paused = false;
 
   private readonly engine = Engine.create({ gravity: GRAVITY });
@@ -43,6 +47,13 @@ export class Board {
   private flying = 0;
   private pegBodies: Matter.Body[] = [];
   private layout: MachineId = 'old';
+  private readonly rushBodies = buildRushBodies();
+  private readonly fieldLayer = new Container();
+  private readonly gateView = new Graphics();
+  private readonly doorView = new Graphics();
+  private field = false;
+  private gateOpen = false;
+  private doorOpen = false;
 
   constructor(private readonly audio: AudioKit, private readonly art: ArtBook) {
     const sensors = buildSensors();
@@ -54,18 +65,99 @@ export class Board {
     this.drawBoard();
     this.pegFlash.blendMode = 'add';
     // 洞口在釘子下面，才不會有被蓋住卻撞得到的釘子。
-    this.root.addChild(this.railLayer, this.pocketView, this.pocketGlow, this.pegLayer, this.pegFlash, this.ballLayer);
+    this.buildFieldView();
+    this.root.addChild(this.railLayer, this.fieldLayer, this.pocketView, this.pocketGlow, this.pegLayer, this.pegFlash, this.ballLayer);
     this.pocketGlow.alpha = 0;
   }
 
   // 換機台就換釘盤。場上還有珠子時不換。
   setLayout(id: MachineId) {
-    if (id === this.layout || this.ballCount > 0) return;
+    if (id === this.layout || this.ballCount > 0 || this.field) return;
     this.layout = id;
     Composite.remove(this.engine.world, this.pegBodies);
     this.pegBodies = buildPegBodies(pegLayout(id));
     Composite.add(this.engine.world, this.pegBodies);
     this.drawPegs();
+  }
+
+  // 大獎和 RUSH 用的右打區。切換時場上的珠子一律收掉，才不會卡在新出現的斜道裡。
+  setField(on: boolean) {
+    if (on === this.field) return;
+    this.clear();
+    this.field = on;
+    const { fixed, gateSensor, attackerSensor, gateLid, gateStop, doorLid, doorStop } = this.rushBodies;
+    const { world } = this.engine;
+    Composite.remove(world, this.pegBodies);
+    this.pegBodies = buildPegBodies(on ? rushPegLayout(this.layout) : pegLayout(this.layout));
+    Composite.add(world, this.pegBodies);
+    this.drawPegs();
+    this.fieldLayer.visible = on;
+    if (on) {
+      Composite.add(world, [...fixed, gateLid, doorLid]);
+      this.gateOpen = false;
+      this.doorOpen = false;
+      this.drawGate();
+      this.drawDoor();
+    } else {
+      Composite.remove(world, [...fixed, gateSensor, attackerSensor, gateLid, gateStop, doorLid, doorStop]);
+    }
+  }
+
+  setGate(open: boolean) {
+    if (open === this.gateOpen) return;
+    this.gateOpen = open;
+    // 感應區跟著開關，門關著時從下面碰到也不算。
+    const { gateLid, gateStop, gateSensor } = this.rushBodies;
+    Composite.remove(this.engine.world, open ? [gateLid] : [gateStop, gateSensor]);
+    Composite.add(this.engine.world, open ? [gateStop, gateSensor] : [gateLid]);
+    this.drawGate();
+  }
+
+  setDoor(open: boolean) {
+    if (open === this.doorOpen) return;
+    this.doorOpen = open;
+    const { doorLid, doorStop, attackerSensor } = this.rushBodies;
+    Composite.remove(this.engine.world, open ? [doorLid] : [doorStop, attackerSensor]);
+    Composite.add(this.engine.world, open ? [doorStop, attackerSensor] : [doorLid]);
+    this.drawDoor();
+  }
+
+  private buildFieldView() {
+    const { plate, rampA, rampB, wall, rampC, gate, attacker } = RUSH_FIELD;
+    const base = new Graphics();
+    base.rect(BOARD.left, BOARD.top, BOARD.right - BOARD.left, BOARD.floor - BOARD.top).fill({ color: 0x0b0714, alpha: 0.72 });
+    base.roundRect(plate.x, plate.y, plate.width, plate.height, 14).fill(0x14060f).stroke({ width: 4, color: 0xffc21a });
+    [rampA, rampB, wall, rampC].forEach(({ x1, y1, x2, y2 }) => {
+      base.moveTo(x1, y1).lineTo(x2, y2).stroke({ width: 8, color: 0xffc21a, cap: 'round' });
+    });
+    const gateLabel = makeText('電動門', 20, 0x9dffc0, 0x06240f, 4);
+    gateLabel.position.set(gate.x, gate.y + 24);
+    const doorLabel = makeText('大開口', 24, 0xffe98c, 0x3a0606, 5);
+    doorLabel.position.set(attacker.x, attacker.y + 26);
+    this.fieldLayer.addChild(base, this.gateView, this.doorView, gateLabel, doorLabel);
+    this.fieldLayer.visible = false;
+  }
+
+  private drawGate() {
+    const { gateLid, gateStop, gate } = RUSH_FIELD;
+    const g = this.gateView.clear();
+    if (this.gateOpen) {
+      g.rect(gate.x - gate.width / 2, gate.y - 34, gate.width, 42).fill({ color: 0x2fe06a, alpha: 0.35 });
+      g.moveTo(gateStop.x1, gateStop.y1).lineTo(gateStop.x2, gateStop.y2).stroke({ width: 8, color: 0x7dff5e, cap: 'round' });
+    } else {
+      g.moveTo(gateLid.x1, gateLid.y1).lineTo(gateLid.x2, gateLid.y2).stroke({ width: 8, color: 0x2f8a4a, cap: 'round' });
+    }
+  }
+
+  private drawDoor() {
+    const { doorLid, doorStop, attacker } = RUSH_FIELD;
+    const g = this.doorView.clear();
+    if (this.doorOpen) {
+      g.rect(attacker.x - attacker.width / 2, attacker.y - 50, attacker.width, 58).fill({ color: 0xffd257, alpha: 0.45 });
+      g.moveTo(doorStop.x1, doorStop.y1).lineTo(doorStop.x2, doorStop.y2).stroke({ width: 10, color: 0xffe94a, cap: 'round' });
+    } else {
+      g.moveTo(doorLid.x1, doorLid.y1).lineTo(doorLid.x2, doorLid.y2).stroke({ width: 10, color: 0xa02018, cap: 'round' });
+    }
   }
 
   private drawPegs() {
@@ -178,6 +270,8 @@ export class Board {
       const ball = this.balls.get(ballBody.id);
       if (!ball) return;
       if (other.label === 'pocket') this.capture(ball);
+      else if (other.label === 'gate') this.captureField(ball, RUSH_FIELD.gate, this.onGate);
+      else if (other.label === 'attacker') this.captureField(ball, RUSH_FIELD.attacker, this.onAttacker);
       else if (other.label === 'floor') this.remove(ball);
       else if (other.label === 'peg') this.hitPeg(other, ballBody);
     });
@@ -209,6 +303,16 @@ export class Board {
     gsap.fromTo(this.pocketGlow, { alpha: 1 }, { alpha: 0, duration: 0.7, ease: 'power2.out' });
     this.ring(pocket.x, pocket.y + 6);
     this.onPocket(ball.force);
+  }
+
+  private captureField(ball: Ball, at: { x: number; y: number }, notify: () => void) {
+    Composite.remove(this.engine.world, ball.body);
+    this.balls.delete(ball.body.id);
+    const { view } = ball;
+    gsap.to(view.position, { x: at.x, y: at.y + 6, duration: 0.1, ease: 'power2.in' });
+    gsap.to(view.scale, { x: 0, y: 0, duration: 0.14, delay: 0.04, onComplete: () => view.destroy() });
+    this.ring(at.x, at.y);
+    notify();
   }
 
   private ring(x: number, y: number) {

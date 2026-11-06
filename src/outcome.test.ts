@@ -1,7 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { CONFIG, RUSH_SPINS, RUSH_STOPS, SYMBOL_COUNT, forcedModes, roll, rollRush, rushSpinReels } from './outcome';
+import { CONFIG, attackerPayout, RUSH_SPINS, RUSH_STOPS, SYMBOL_COUNT, forcedModes, roll, rollRush, rushSpinReels } from './outcome';
 
 const N = 200_000;
+
+describe('大開口出珠', () => {
+  it('全進剛好拿滿，少進就少拿', () => {
+    expect(attackerPayout(700, 50)).toBe(700);
+    expect(attackerPayout(700, 99)).toBe(700);
+    expect(attackerPayout(700, 25)).toBe(350);
+    expect(attackerPayout(3500, 1)).toBe(70);
+    expect(attackerPayout(1050, 0)).toBe(0);
+  });
+});
 
 describe('roll', () => {
   it('keeps reels consistent with the result', () => {
