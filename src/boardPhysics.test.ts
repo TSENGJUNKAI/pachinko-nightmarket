@@ -8,7 +8,19 @@ const IDS: MachineId[] = ['old', 'steady', 'wild'];
 const BALL = BALL_RADIUS * 2;
 
 // 實際打一批珠子，回傳進洞和停住的比例。
+// 固定種子：物理測試每次結果都一樣，不會讓部署偶爾失敗。
+function seeded(seed: number) {
+  let state = seed;
+  return () => {
+    state = (state + 0x6d2b79f5) | 0;
+    let t = Math.imul(state ^ (state >>> 15), 1 | state);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 function shootBatch(id: MachineId, power: number, count: number) {
+  const rng = seeded(Math.round(power * 100) + 1);
   const engine = Engine.create({ gravity: GRAVITY });
   const sensors = buildSensors();
   Composite.add(engine.world, [...buildStatics(), ...buildPegBodies(pegLayout(id)), sensors.pocket, sensors.floor]);
@@ -23,7 +35,7 @@ function shootBatch(id: MachineId, power: number, count: number) {
   let pocket = 0;
   let stuck = 0;
   for (let i = 0; i < count; i += 1) {
-    const shot = releaseFor(power);
+    const shot = releaseFor(power, rng);
     const body = Bodies.circle(shot.x, shot.y, BALL_RADIUS, BALL_OPTIONS, BALL_SIDES);
     Body.setVelocity(body, { x: shot.vx, y: shot.vy });
     Composite.add(engine.world, body);
@@ -34,7 +46,7 @@ function shootBatch(id: MachineId, power: number, count: number) {
       Engine.update(engine, STEP);
       still = isStill(body) ? still + STEP / 1000 : 0;
       const action = stillAction(still);
-      if (action === 'nudge') nudge(body);
+      if (action === 'nudge') nudge(body, rng);
       if (action === 'remove') ended = 'stuck';
     }
     if (ended === 'pocket') pocket += 1;
@@ -77,7 +89,8 @@ describe('實際打珠', () => {
   }, 120000);
 
   it('穩定台最好進，狂暴台最難進', () => {
-    const rate = (id: MachineId) => shootBatch(id, 0.55, 500).pocket;
+    // 多個力道平均，看的是整台的傾向。
+    const rate = (id: MachineId) => [0.35, 0.55, 0.75].reduce((sum, power) => sum + shootBatch(id, power, 400).pocket, 0) / 3;
     const [old, steady, wild] = IDS.map(rate);
     expect(steady).toBeGreaterThan(old);
     expect(old).toBeGreaterThan(wild);

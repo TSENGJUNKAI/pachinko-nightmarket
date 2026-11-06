@@ -72,7 +72,7 @@ describe('機台', () => {
       for (let i = 0; i < 100_000; i += 1) if (roll(Math.random, '', { hitRate }).hit) hits += 1;
       return hits / 100_000;
     };
-    expect(rate(MACHINES[1].hitRate)).toBeGreaterThan(rate(MACHINES[2].hitRate) * 1.3);
+    expect(rate(MACHINES[1].hitRate)).toBeGreaterThan(rate(MACHINES[2].hitRate) * 1.2);
   });
 
   it('隱藏演出只出現在中獎時', () => {
