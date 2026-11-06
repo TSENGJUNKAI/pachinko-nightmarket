@@ -4,23 +4,15 @@ import gsap from 'gsap';
 import Matter from 'matter-js';
 import type { ArtBook } from './art';
 import type { AudioKit } from './audio';
+import { assistRoof, BALL_OPTIONS, BALL_RADIUS, BALL_SIDES, BOARD, GRAVITY, GUIDES, PEG_RADIUS, STEP, buildPegBodies, buildSensors, buildStatics, isStill, nudge, pegLayout, railPoint, releaseFor, stillAction } from './boardPhysics';
+import type { MachineId } from './machines';
 
 const { Bodies, Body, Composite, Engine, Events } = Matter;
 
-export const BOARD = {
-  left: 26,
-  right: 694,
-  top: 124,
-  floor: 882,
-  lcd: { left: 88, right: 632, top: 170, bottom: 530 },
-  pocket: { x: 360, y: 812, width: 58 },
-};
+export { BOARD };
 
-const BALL_RADIUS = 9;
-const PEG_RADIUS = 5;
 const MAX_BALLS = 14;
 const MAX_AGE = 16;
-const STEP = 1000 / 120;
 const POCKET_WIDTH = 214;
 const POCKET_HOLE_Y = 0.617;
 
@@ -28,20 +20,8 @@ interface Ball {
   body: Matter.Body;
   view: Sprite;
   age: number;
+  still: number;
   force: string;
-}
-
-function railPoint(t: number) {
-  // 軌道：沿左牆往上，再沿頂部弧線往右。
-  const { left, right, top, floor } = BOARD;
-  const riseEnd = 0.45;
-  if (t < riseEnd) {
-    return { x: left - 11, y: floor - ((floor - (top + 110)) * t) / riseEnd };
-  }
-  const arc = ((t - riseEnd) / (1 - riseEnd)) * Math.PI;
-  const cx = (left + right) / 2;
-  const rx = (right - left) / 2 + 6;
-  return { x: cx - Math.cos(arc) * rx, y: top + 110 - Math.sin(arc) * 96 };
 }
 
 export class Board {
@@ -50,7 +30,7 @@ export class Board {
   onPocket: (force: string) => void = () => undefined;
   paused = false;
 
-  private readonly engine = Engine.create({ gravity: { x: 0, y: 1, scale: 0.0011 } });
+  private readonly engine = Engine.create({ gravity: GRAVITY });
   private readonly railLayer = new Graphics();
   private readonly pegLayer = new Container();
   private readonly ballLayer = new Container();
@@ -61,33 +41,13 @@ export class Board {
   private accumulator = 0;
   private lastTick = 0;
   private flying = 0;
-  private readonly pegBodies: Matter.Body[] = [];
-  private readonly pocketSensor: Matter.Body;
-  private readonly floorSensor: Matter.Body;
+  private pegBodies: Matter.Body[] = [];
+  private layout: MachineId = 'old';
 
   constructor(private readonly audio: AudioKit, private readonly art: ArtBook) {
-    const { left, right, top, floor, lcd, pocket } = BOARD;
-    const wall = { isStatic: true, restitution: 0.4, friction: 0.02 };
-    const statics: Matter.Body[] = [
-      Bodies.rectangle(left - 20, (top + floor) / 2, 40, floor - top + 200, wall),
-      Bodies.rectangle(right + 20, (top + floor) / 2, 40, floor - top + 200, wall),
-      Bodies.rectangle((left + right) / 2, top - 22, right - left + 80, 44, wall),
-      // 轉盤本身是障礙物，頂部是斜面，珠子會滾向兩側。
-      Bodies.rectangle((lcd.left + lcd.right) / 2, (lcd.top + lcd.bottom) / 2, lcd.right - lcd.left, lcd.bottom - lcd.top, wall),
-      ...this.roofSlopes(),
-      // 兩側導軌把一部分珠子往中間送。
-      this.slope(left, 580, 150, 626),
-      this.slope(right, 580, 570, 626),
-      // 洞口兩邊的擋板，形成漏斗。
-      this.slope(pocket.x - pocket.width / 2 - 34, pocket.y - 42, pocket.x - pocket.width / 2 - 2, pocket.y + 2),
-      this.slope(pocket.x + pocket.width / 2 + 34, pocket.y - 42, pocket.x + pocket.width / 2 + 2, pocket.y + 2),
-    ];
-
-    this.pocketSensor = Bodies.rectangle(pocket.x, pocket.y + 4, pocket.width - 6, 14, { isStatic: true, isSensor: true, label: 'pocket' });
-    this.floorSensor = Bodies.rectangle((left + right) / 2, floor + 16, right - left + 40, 20, { isStatic: true, isSensor: true, label: 'floor' });
-
-    this.buildPegs();
-    Composite.add(this.engine.world, [...statics, ...this.pegBodies, this.pocketSensor, this.floorSensor]);
+    const sensors = buildSensors();
+    this.pegBodies = buildPegBodies(pegLayout(this.layout));
+    Composite.add(this.engine.world, [...buildStatics(), ...this.pegBodies, sensors.pocket, sensors.floor]);
     Events.on(this.engine, 'collisionStart', (event) => this.onCollision(event));
 
     this.pocketView = new Sprite(art.pocket);
@@ -98,54 +58,30 @@ export class Board {
     this.pocketGlow.alpha = 0;
   }
 
-  private roofSlopes() {
-    const { lcd } = BOARD;
-    const mid = (lcd.left + lcd.right) / 2;
-    return [this.slope(lcd.left - 4, lcd.top + 2, mid, lcd.top - 10), this.slope(lcd.right + 4, lcd.top + 2, mid, lcd.top - 10)];
+  // 換機台就換釘盤。場上還有珠子時不換。
+  setLayout(id: MachineId) {
+    if (id === this.layout || this.ballCount > 0) return;
+    this.layout = id;
+    Composite.remove(this.engine.world, this.pegBodies);
+    this.pegBodies = buildPegBodies(pegLayout(id));
+    Composite.add(this.engine.world, this.pegBodies);
+    this.drawPegs();
   }
 
-  private slope(x1: number, y1: number, x2: number, y2: number) {
-    const length = Math.hypot(x2 - x1, y2 - y1);
-    return Bodies.rectangle((x1 + x2) / 2, (y1 + y2) / 2, length, 8, {
-      isStatic: true,
-      angle: Math.atan2(y2 - y1, x2 - x1),
-      restitution: 0.35,
-      friction: 0.01,
-      label: 'guide',
+  private drawPegs() {
+    this.pegLayer.removeChildren().forEach((child) => child.destroy());
+    this.pegBodies.forEach((peg) => {
+      const sprite = new Sprite(this.art.peg);
+      sprite.anchor.set(0.5);
+      sprite.width = PEG_RADIUS * 2 + 3;
+      sprite.height = PEG_RADIUS * 2 + 3;
+      sprite.position.set(peg.position.x, peg.position.y);
+      this.pegLayer.addChild(sprite);
     });
   }
 
-  private buildPegs() {
-    const { left, right, lcd, floor, pocket } = BOARD;
-    const pegOptions = { isStatic: true, restitution: 0.55, friction: 0.01, label: 'peg' };
-    const add = (x: number, y: number) => {
-      this.pegBodies.push(Bodies.circle(x, y, PEG_RADIUS, pegOptions));
-    };
-    // 轉盤左右兩側的窄通道。
-    for (let y = 190; y < 560; y += 46) {
-      const offset = Math.round((y - 190) / 46) % 2 ? 0 : 18;
-      add(left + 16 + offset, y);
-      add(right - 16 - offset, y);
-    }
-    // 轉盤下方的主釘陣。
-    let row = 0;
-    for (let y = 560; y < floor - 34; y += 40) {
-      const xOffset = row % 2 ? 26 : 0;
-      for (let x = left + 40 + xOffset; x < right - 30; x += 52) {
-        const nearPocket = Math.abs(x - pocket.x) < pocket.width / 2 + 40 && y > pocket.y - 60 && y < pocket.y + 30;
-        const nearLcd = y < lcd.bottom + 20;
-        const nearGuide = (x < 176 || x > 544) && y < 650;
-        if (!nearPocket && !nearLcd && !nearGuide) add(x, y);
-      }
-      row += 1;
-    }
-    // 天釘：洞口正上方的兩根，決定珠子進不進得去。
-    add(pocket.x - pocket.width / 2 + 3, pocket.y - 52);
-    add(pocket.x + pocket.width / 2 - 3, pocket.y - 52);
-  }
-
   private drawBoard() {
-    const { left, right, pocket } = BOARD;
+    const { pocket } = BOARD;
     const g = this.railLayer;
     // 發射軌道。
     const start = railPoint(0);
@@ -156,20 +92,12 @@ export class Board {
     }
     g.stroke({ width: 22, color: 0x14060f, alpha: 0.72, join: 'round' });
 
-    this.pegBodies.forEach((peg) => {
-      const sprite = new Sprite(this.art.peg);
-      sprite.anchor.set(0.5);
-      sprite.width = PEG_RADIUS * 2 + 3;
-      sprite.height = PEG_RADIUS * 2 + 3;
-      sprite.position.set(peg.position.x, peg.position.y);
-      this.pegLayer.addChild(sprite);
-    });
+    this.drawPegs();
 
     const line = (x1: number, y1: number, x2: number, y2: number) => {
       g.moveTo(x1, y1).lineTo(x2, y2).stroke({ width: 8, color: 0xffc21a, cap: 'round' });
     };
-    line(left, 580, 150, 626);
-    line(right, 580, 570, 626);
+    GUIDES.forEach((guide) => line(guide.x1, guide.y1, guide.x2, guide.y2));
 
     // 圖裡的黑洞對準感應區，兩側金色擋板就是物理上的漏斗。
     const w = pocket.width;
@@ -196,8 +124,8 @@ export class Board {
     this.audio.launch();
     this.flying += 1;
 
-    // 真實機台每顆力道都有一點誤差，同樣的力道才不會走同一條路。
-    const release = 0.5 + Math.max(0, Math.min(1, power)) * 0.42 + (Math.random() - 0.5) * 0.035;
+    const shot = releaseFor(power);
+    const { release } = shot;
     const progress = { t: 0 };
     gsap.to(progress, {
       t: release,
@@ -209,9 +137,7 @@ export class Board {
       },
       onComplete: () => {
         this.flying -= 1;
-        const before = railPoint(release - 0.01);
-        const at = railPoint(release);
-        this.spawnBody(view, at.x, Math.max(at.y, BOARD.top + 12), (at.x - before.x) * 0.6, (at.y - before.y) * 0.5 + (Math.random() - 0.5) * 1.5, force);
+        this.spawnBody(view, shot.x, shot.y, shot.vx, shot.vy, force);
       },
     });
     return true;
@@ -238,10 +164,10 @@ export class Board {
   }
 
   private spawnBody(view: Sprite, x: number, y: number, vx: number, vy: number, force: string) {
-    const body = Bodies.circle(x, y, BALL_RADIUS, { restitution: 0.5, friction: 0.01, frictionAir: 0.006, density: 0.002, label: 'ball' });
+    const body = Bodies.circle(x, y, BALL_RADIUS, BALL_OPTIONS, BALL_SIDES);
     Body.setVelocity(body, { x: vx, y: vy });
     Composite.add(this.engine.world, body);
-    this.balls.set(body.id, { body, view, age: 0, force });
+    this.balls.set(body.id, { body, view, age: 0, still: 0, force });
   }
 
   private onCollision(event: Matter.IEventCollision<Matter.Engine>) {
@@ -311,6 +237,7 @@ export class Board {
     this.lastTick = delta;
     this.accumulator += Math.min(delta * 1000, 100);
     while (this.accumulator >= STEP) {
+      this.balls.forEach((ball) => assistRoof(ball.body));
       Engine.update(this.engine, STEP);
       this.accumulator -= STEP;
     }
@@ -319,9 +246,10 @@ export class Board {
       ball.view.position.set(ball.body.position.x, ball.body.position.y);
       ball.view.rotation = ball.body.angle;
       const outside = ball.body.position.y > BOARD.floor + 60 || ball.body.position.x < 0 || ball.body.position.x > 720;
-      // 極少數卡住的珠子輕推一下，太久就收掉。
-      if (ball.age > 6 && ball.body.speed < 0.15) Body.applyForce(ball.body, ball.body.position, { x: (Math.random() - 0.5) * 0.0006, y: -0.0004 });
-      if (outside || ball.age > MAX_AGE) this.remove(ball);
+      ball.still = isStill(ball.body) ? ball.still + this.lastTick : 0;
+      const action = stillAction(ball.still);
+      if (action === 'nudge') nudge(ball.body);
+      if (outside || action === 'remove' || ball.age > MAX_AGE) this.remove(ball);
     });
   }
 }

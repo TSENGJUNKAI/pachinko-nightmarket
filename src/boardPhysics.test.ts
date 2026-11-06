@@ -1,0 +1,85 @@
+import { describe, expect, it } from 'vitest';
+import Matter from 'matter-js';
+import { assistRoof, BALL_OPTIONS, BALL_RADIUS, BALL_SIDES, BOARD, GRAVITY, PEG_RADIUS, STEP, buildPegBodies, buildSensors, buildStatics, isStill, nudge, pegLayout, releaseFor, stillAction } from './boardPhysics';
+import type { MachineId } from './machines';
+
+const { Bodies, Body, Composite, Engine, Events } = Matter;
+const IDS: MachineId[] = ['old', 'steady', 'wild'];
+const BALL = BALL_RADIUS * 2;
+
+// 實際打一批珠子，回傳進洞和停住的比例。
+function shootBatch(id: MachineId, power: number, count: number) {
+  const engine = Engine.create({ gravity: GRAVITY });
+  const sensors = buildSensors();
+  Composite.add(engine.world, [...buildStatics(), ...buildPegBodies(pegLayout(id)), sensors.pocket, sensors.floor]);
+  let ended = '';
+  Events.on(engine, 'collisionStart', ({ pairs }) => {
+    pairs.forEach(({ bodyA, bodyB }) => {
+      const labels = [bodyA.label, bodyB.label];
+      if (labels.includes('ball') && labels.includes('pocket')) ended = 'pocket';
+      else if (labels.includes('ball') && labels.includes('floor')) ended = ended || 'floor';
+    });
+  });
+  let pocket = 0;
+  let stuck = 0;
+  for (let i = 0; i < count; i += 1) {
+    const shot = releaseFor(power);
+    const body = Bodies.circle(shot.x, shot.y, BALL_RADIUS, BALL_OPTIONS, BALL_SIDES);
+    Body.setVelocity(body, { x: shot.vx, y: shot.vy });
+    Composite.add(engine.world, body);
+    ended = '';
+    let still = 0;
+    for (let step = 0; step < 16 * 120 && !ended; step += 1) {
+      assistRoof(body);
+      Engine.update(engine, STEP);
+      still = isStill(body) ? still + STEP / 1000 : 0;
+      const action = stillAction(still);
+      if (action === 'nudge') nudge(body);
+      if (action === 'remove') ended = 'stuck';
+    }
+    if (ended === 'pocket') pocket += 1;
+    if (ended === 'stuck' || !ended) {
+      stuck += 1;
+    }
+    Composite.remove(engine.world, body);
+  }
+  return { pocket: pocket / count, stuck: stuck / count };
+}
+
+describe('釘盤幾何', () => {
+  it.each(IDS)('%s 的釘子和牆、轉盤之間都放得下珠子', (id) => {
+    const { left, right, lcd } = BOARD;
+    for (const { x, y } of pegLayout(id)) {
+      expect(Math.min(x - left, right - x) - PEG_RADIUS).toBeGreaterThan(BALL);
+      if (y > lcd.top && y < lcd.bottom) {
+        const gap = x < lcd.left ? lcd.left - x : x - lcd.right;
+        expect(gap - PEG_RADIUS).toBeGreaterThan(BALL);
+      }
+    }
+  });
+
+  it.each(IDS)('%s 沒有水平擠在一起、會接住珠子的釘子', (id) => {
+    const points = pegLayout(id);
+    for (let i = 0; i < points.length; i += 1) {
+      for (let j = i + 1; j < points.length; j += 1) {
+        const dx = Math.abs(points[i].x - points[j].x);
+        const dy = Math.abs(points[i].y - points[j].y);
+        const gap = Math.hypot(dx, dy) - PEG_RADIUS * 2;
+        if (gap < BALL + 2) expect(dy, `${id} ${points[i].x},${points[i].y}`).toBeGreaterThan(dx * 0.5);
+      }
+    }
+  });
+});
+
+describe('實際打珠', () => {
+  it.each(IDS)('%s 幾乎不卡珠', (id) => {
+    for (const power of [0.2, 0.55, 0.9]) expect(shootBatch(id, power, 150).stuck).toBeLessThan(0.08);
+  }, 120000);
+
+  it('穩定台最好進，狂暴台最難進', () => {
+    const rate = (id: MachineId) => shootBatch(id, 0.55, 500).pocket;
+    const [old, steady, wild] = IDS.map(rate);
+    expect(steady).toBeGreaterThan(old);
+    expect(old).toBeGreaterThan(wild);
+  }, 120000);
+});

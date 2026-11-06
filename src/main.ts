@@ -335,6 +335,7 @@ function renderMachines() {
   }));
   el('machine-desc').textContent = current.desc;
   stage.setMachineTint(current.tint);
+  stage.board.setLayout(current.id);
 }
 
 function eventOptionButton(option: EventOption, rent: number, today: Today) {
