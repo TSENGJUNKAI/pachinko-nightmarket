@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>救救阿公的攤位</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main id="game">
+    <div id="canvas-slot"></div>
+    <section id="controls" aria-label="遊戲操作">
+      <div id="stats" aria-live="polite">
+        <span>發射 <b id="stat-shots">0</b></span>
+        <span>轉數 <b id="stat-spins">0</b></span>
+        <span>大獎 <b id="stat-wins">0</b></span>
+        <span>最高連莊 <b id="stat-chain">0</b></span>
+        <span>出珠 <b id="stat-balls">0</b></span>
+      </div>
+      <div id="actions">
+        <button id="fire" type="button"><span id="fire-label">發射！</span><small id="fire-hint">按住連發・空白鍵</small></button>
+        <div id="options">
+          <label for="power">力道 <b id="power-value">55</b></label>
+          <input id="power" type="range" min="0" max="100" value="55">
+          <label for="force">演出測試</label>
+          <select id="force">
+            <option value="">關閉（正常打珠）</option>
+            <option value="miss">直接沒中</option>
+            <option value="reachMiss">藍色聽牌，沒中</option>
+            <option value="goldMiss">金色聽牌，沒中</option>
+            <option value="reachHit">紅色聽牌，中獎，RUSH 沒連莊</option>
+            <option value="comeback">沒中後復活</option>
+            <option value="superHit">三聖筊必中，RUSH 連莊 2 次</option>
+            <option value="rushFinal">RUSH 一路走到廟口</option>
+          </select>
+          <button id="mute" type="button" aria-pressed="false">聲音：開</button>
+        </div>
+      </div>
+      <p id="note">試玩版：中獎率刻意調高，聲音是暫代版本。</p>
+    </section>
+  </main>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

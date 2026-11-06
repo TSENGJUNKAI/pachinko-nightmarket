@@ -1,0 +1,127 @@
+:root {
+  --bg: #0b0714;
+  --panel: #1b1228;
+  --line: #4b3560;
+  --text: #fff4dc;
+  --muted: #c9b8d6;
+  --accent: #ff4d4d;
+  --accent-dark: #a81e2c;
+  --gold: #ffd257;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Microsoft JhengHei", "PingFang TC", "Noto Sans TC", sans-serif;
+}
+
+#game {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 100dvh;
+}
+
+#canvas-slot canvas {
+  display: block;
+  width: min(100vw, calc((100dvh - 212px) * 0.6667)) !important;
+  height: auto !important;
+}
+
+#controls {
+  width: min(100vw, calc((100dvh - 212px) * 0.6667));
+  min-width: min(100vw, 360px);
+  padding: 8px 12px;
+  background: var(--panel);
+  border-top: 2px solid var(--line);
+}
+
+#stats {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 2px 10px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+#stats b {
+  color: var(--gold);
+  font-variant-numeric: tabular-nums;
+}
+
+#actions {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+  margin-top: 6px;
+}
+
+button, select {
+  font: inherit;
+  color: var(--text);
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #2a1d3a;
+  min-height: 36px;
+}
+
+button { cursor: pointer; }
+
+button:focus-visible, select:focus-visible {
+  outline: 3px solid var(--gold);
+  outline-offset: 2px;
+}
+
+#fire {
+  flex: 1 1 45%;
+  font-size: 20px;
+  font-weight: 800;
+  background: var(--accent);
+  border-color: var(--accent-dark);
+  box-shadow: 0 4px 0 var(--accent-dark);
+}
+
+#fire small {
+  display: block;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 400;
+}
+
+#fire:active:not(:disabled) {
+  transform: translateY(3px);
+  box-shadow: 0 1px 0 var(--accent-dark);
+}
+
+#fire:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
+#options {
+  flex: 1 1 55%;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 8px;
+  align-items: center;
+  font-size: 13px;
+}
+
+#options select { min-width: 0; width: 100%; }
+
+#mute { grid-column: 1 / -1; }
+
+#power { width: 100%; min-width: 0; accent-color: var(--gold); }
+
+#fire { touch-action: none; user-select: none; }
+
+#note {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--muted);
+}
