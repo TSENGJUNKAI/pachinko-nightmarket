@@ -43,6 +43,8 @@ export interface RoundStats {
 
 export class Director {
   readonly rush: RushMode;
+  // 攤位等級帶來的出珠倍率。
+  payoutScale = 1;
 
   constructor(
     private readonly stage: Stage,
@@ -312,12 +314,13 @@ export class Director {
 
     audio.music('jackpot');
     const stopParty = this.startParty();
+    const round = Math.round(CONFIG.ballsPerRound * this.payoutScale);
     const counter = stage.bigText('出珠 0', 'gold', { size: 96, y: 900, hold: null, outline: 0.8 });
-    await this.countBalls(0, CONFIG.ballsPerRound, 2.6, (value) => this.replaceCounter(counter, value));
+    await this.countBalls(0, round, 2.6, (value) => this.replaceCounter(counter, value));
     this.dropCounter();
     stopParty();
 
-    const rush: RushResult = await this.rush.play(outcome.rush ?? { hitSpins: [], reachedFinal: false }, CONFIG.ballsPerRound);
+    const rush: RushResult = await this.rush.play(outcome.rush ?? { hitSpins: [], reachedFinal: false }, round, this.payoutScale);
 
     this.onStats({ win: 1, balls: rush.totalBalls, chain: rush.hits + 1, reachedFinal: rush.reachedFinal });
     this.resetLights();
@@ -352,13 +355,14 @@ export class Director {
     return new Promise<void>((resolve) => {
       const counter = { value: from };
       let lastShown = -1;
+      // 大約跳 40 次，避免頻繁重畫大字。
+      const step = Math.max(50, Math.ceil(to / 40 / 50) * 50);
       gsap.to(counter, {
         value: to,
         duration: seconds,
         ease: 'none',
         onUpdate: () => {
-          // 每 50 顆更新一次，避免頻繁重畫大字。
-          const shown = Math.floor(counter.value / 50) * 50;
+          const shown = Math.floor(counter.value / step) * step;
           if (shown !== lastShown) {
             lastShown = shown;
             onValue(shown);

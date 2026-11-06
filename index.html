@@ -8,14 +8,33 @@
 </head>
 <body>
   <main id="game">
-    <div id="canvas-slot"></div>
+    <div id="canvas-slot">
+      <section id="screen" aria-live="polite" hidden>
+        <div id="screen-card">
+          <h1 id="screen-title"></h1>
+          <p id="screen-story"></p>
+          <div id="billing"></div>
+          <div id="stall-panel">
+            <div id="stall-head">
+              <span id="stall-title"></span>
+              <span>攤位 Lv.<b id="stall-level">1</b>　大獎出珠 <b id="stall-scale">×1.0</b></span>
+            </div>
+            <button id="upgrade" type="button"></button>
+            <p id="next-rent"></p>
+          </div>
+          <button id="open-night" type="button"></button>
+          <button id="restart" type="button"></button>
+        </div>
+      </section>
+    </div>
     <section id="controls" aria-label="遊戲操作">
       <div id="stats" aria-live="polite">
-        <span>發射 <b id="stat-shots">0</b></span>
-        <span>轉數 <b id="stat-spins">0</b></span>
-        <span>大獎 <b id="stat-wins">0</b></span>
-        <span>最高連莊 <b id="stat-chain">0</b></span>
-        <span>出珠 <b id="stat-balls">0</b></span>
+        <span>第 <b id="stat-night">1</b> 晚</span>
+        <span>收攤可得 <b id="stat-value">0</b></span>
+        <span>現金 <b id="stat-cash">0</b></span>
+        <span>珠子 <b id="stat-balls">0</b></span>
+        <span>地頭費 <b id="stat-rent">0</b></span>
+        <span>Lv.<b id="stat-level">1</b></span>
       </div>
       <div id="actions">
         <button id="fire" type="button"><span id="fire-label">發射！</span><small id="fire-hint">按住連發・空白鍵</small></button>
@@ -33,10 +52,13 @@
             <option value="superHit">三聖筊必中，RUSH 連莊 2 次</option>
             <option value="rushFinal">RUSH 一路走到廟口</option>
           </select>
-          <button id="mute" type="button" aria-pressed="false">聲音：開</button>
+          <div id="night-buttons">
+            <button id="buy" type="button">買100珠<small id="buy-cost">−400 元</small></button>
+            <button id="close-stall" type="button">收攤</button>
+            <button id="mute" type="button" aria-pressed="false">聲音：開</button>
+          </div>
         </div>
       </div>
-      <p id="note">試玩版：中獎率刻意調高，聲音是暫代版本。</p>
     </section>
   </main>
   <script type="module" src="/src/main.ts"></script>

@@ -31,15 +31,15 @@ export interface Outcome {
   rush: RushPlan | null;
 }
 
-// 展示用數值，刻意調高中獎率，之後再校正。
+// 平均每晚約 1 次大獎；數值是模擬後的起始值。
 export const CONFIG = {
-  hitRate: 1 / 6,
-  reachOnMiss: 0.3,
+  hitRate: 1 / 30,
+  reachOnMiss: 0.2,
   comebackRate: 0.15,
   // 每次轉動約 9.5%，8 次內至少中一次的機率約 55%。
   rushSpinHitRate: 0.095,
-  ballsPerRound: 1500,
-  ballsFinal: 7500,
+  ballsPerRound: 700,
+  ballsFinal: 3500,
   tierWeights: {
     hit: { blue: 0.1, red: 0.35, gold: 0.55 },
     miss: { blue: 0.72, red: 0.24, gold: 0.04 },

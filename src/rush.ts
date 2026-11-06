@@ -34,6 +34,7 @@ export class RushMode {
   private ballsText = makeText('', 40, 0xffe98c, 0x3a0606, 7);
   private balls = 0;
   private stopIndex = 0;
+  private scale = 1;
 
   constructor(
     private readonly stage: Stage,
@@ -115,7 +116,7 @@ export class RushMode {
     const miss = Math.abs(1 - this.gaugeTime / this.gaugeDuration);
     const quality = miss <= PERFECT_WINDOW ? 'perfect' : miss <= GOOD_WINDOW ? 'good' : 'late';
     this.audio.gongHit(quality);
-    const bonus = GONG_BONUS[quality];
+    const bonus = Math.round(GONG_BONUS[quality] * this.scale);
     this.setBalls(this.balls + bonus);
 
     gsap.fromTo(this.gauge.scale, { x: 1.3, y: 1.3 }, { x: 1, y: 1, duration: 0.25, ease: 'back.out(3)' });
@@ -218,7 +219,7 @@ export class RushMode {
     stage.bigText('連莊', 'fire', { size: 240, vertical: true, y: HEIGHT * 0.5, hold: 0.95, maxHeight: 660 });
     stage.bigText(`×${hitNumber + 1}`, 'rainbow', { size: 130, x: 572, y: HEIGHT * 0.5, hold: 0.95, maxWidth: 270 });
     const stopParty = this.rainBalls();
-    await this.countUp(CONFIG.ballsPerRound, 1.5);
+    await this.countUp(Math.round(CONFIG.ballsPerRound * this.scale), 1.5);
     stopParty();
 
     this.stopIndex += 1;
@@ -286,7 +287,7 @@ export class RushMode {
     stage.paperRain(70);
     stage.bigText('遶境成功', 'rainbow', { size: 190, vertical: true, y: HEIGHT * 0.5, hold: 2.3, maxHeight: 860 });
     const stopParty = this.rainBalls();
-    await this.countUp(CONFIG.ballsFinal, 2.4);
+    await this.countUp(Math.round(CONFIG.ballsFinal * this.scale), 2.4);
     stopParty();
     gate.destroy();
   }
@@ -314,7 +315,8 @@ export class RushMode {
     this.onActiveChange(false);
   }
 
-  async play(plan: RushPlan, startBalls: number): Promise<RushResult> {
+  async play(plan: RushPlan, startBalls: number, scale = 1): Promise<RushResult> {
+    this.scale = scale;
     await this.enter(startBalls);
 
     let hits = 0;
