@@ -6,7 +6,8 @@ import { AudioKit } from './audio';
 import { Stage } from './stage';
 import { Director } from './director';
 import { loadFonts } from './text';
-import { ECONOMY, ballPrice, ballsToCash, buyBalls, moneyText, newRun, newTitleAt, payoutScale, rentForNight, settle, titleFor, upgradeCost, type RunState } from './economy';
+import { BOSS_DAMAGE, bossForNight, type Boss, type BossHit } from './boss';
+import { ECONOMY, ballPrice, ballsToCash, buyBalls, moneyText, newRun, payoutScale, rentForNight, settle, titleFor, upgradeCost, type RunState } from './economy';
 
 function el<T extends HTMLElement>(id: string) {
   return document.getElementById(id) as T;
@@ -40,7 +41,7 @@ const INTRO_STORY = '阿公欠下地頭費。每晚收攤都要繳錢，繳不�
 function loadRun(): RunState {
   try {
     const saved = JSON.parse(localStorage.getItem(SAVE_KEY) ?? 'null') as RunState | null;
-    if (saved && saved.night >= 1 && saved.level >= 1 && saved.cash >= 0) return saved;
+    if (saved && saved.night >= 1 && saved.level >= 1 && saved.cash >= 0) return { ...newRun(), ...saved };
   } catch {
     // 讀不到存檔就從頭開始。
   }
@@ -63,17 +64,48 @@ let closing = false;
 // 錢不夠繳時，收攤要按兩次才算數。
 let closeArmed = false;
 let nightJackpots = 0;
+let boss: Boss | null = null;
+let bossHp = 0;
+
+const bossAlive = () => boss !== null && bossHp > 0;
+const bossDead = () => boss !== null && bossHp <= 0;
+
+function amountDue() {
+  return rentForNight(run.night) + (bossAlive() ? boss!.penalty : 0);
+}
+
+function closingValue() {
+  return run.cash + ballsToCash(balls, run.night) + (bossDead() ? boss!.bonus : 0);
+}
+
+function hitBoss(hit: BossHit) {
+  if (!boss || bossHp <= 0) return;
+  const amount = BOSS_DAMAGE[hit];
+  bossHp -= amount;
+  stage.bossBar.hit(bossHp, amount);
+  if (bossHp <= 0) {
+    audio.rainbowSting();
+    audio.firecrackers(12);
+    stage.flash(0xffffff, 0.55, 0.4);
+    stage.shake(22, 0.5);
+    stage.sparks(360, 60, 90, [0xffd257, 0xff4d4d, 0xffffff], 520);
+    stage.bigText('打倒地頭蛇', 'fire', { size: 96, y: 320, hold: 1.2, maxWidth: 660 });
+  } else if (amount >= BOSS_DAMAGE.chain) {
+    stage.shake(10, 0.2);
+  }
+  renderHud();
+}
 
 function renderHud() {
   el('stat-night').textContent = String(run.night);
-  const value = run.cash + ballsToCash(balls, run.night);
-  const rent = rentForNight(run.night);
+  const value = closingValue();
+  const rent = amountDue();
   const statValue = el('stat-value');
   statValue.textContent = moneyText(value);
   statValue.classList.toggle('short', phase === 'night' && value < rent);
   el('stat-cash').textContent = moneyText(run.cash);
   el('stat-balls').textContent = moneyText(balls);
-  el('stat-rent').textContent = moneyText(rentForNight(run.night));
+  el('stat-rent').textContent = moneyText(rent);
   el('stat-level').textContent = String(run.level);
   const canAct = phase === 'night' && !closing;
   el('buy-cost').textContent = `−${moneyText(ballPrice(run.night) * ECONOMY.buyBalls)} 元`;
@@ -119,10 +151,13 @@ const director = new Director(
   },
   (active) => {
     setRushControls(active);
+    stage.bossBar.setRush(active);
     updateFireButton();
   },
   setTakeover,
 );
+
+director.onBossHit = hitBoss;
 
 // 保留：進洞的珠子排隊，最多 4 顆，一次演一個結果。
 const MAX_HOLD = 4;
@@ -135,6 +170,7 @@ async function runQueue() {
   while (queue.length) {
     const force = queue.shift() ?? '';
     stage.setHoldLamps(queue.length);
+    hitBoss('spin');
     await director.run(roll(Math.random, force));
   }
   running = false;
@@ -211,7 +247,11 @@ function renderStall() {
   const cost = upgradeCost(run.level);
   el('stall-level').textContent = String(run.level);
   el('stall-scale').textContent = `×${payoutScale(run.level).toFixed(1)}`;
-  el('stall-title').textContent = titleFor(run.night - 1);
+  el('stall-title').textContent = titleFor(run.bossWins);
+  const next = bossForNight(run.night);
+  const note = el('boss-note');
+  note.hidden = !next;
+  if (next) note.textContent = `今晚地頭蛇「${next.name}」來收保護費！血量 ${next.hp}。收攤前打倒可賺 ${moneyText(next.bonus)} 元，打不倒要多繳 ${moneyText(next.penalty)} 元。`;
   upgradeButton.textContent = `升級攤位　−${moneyText(cost)} 元`;
   upgradeButton.disabled = run.cash < cost;
   el('next-rent').textContent = `第 ${run.night} 晚：地頭費 ${moneyText(rentForNight(run.night))} 元，珠價每顆 ${moneyText(ballPrice(run.night))} 元`;
@@ -246,17 +286,26 @@ function finishNight() {
   closing = false;
   stopFiring();
   const finished = run.night;
-  const result = settle(run.cash, balls, finished);
+  const beaten = bossDead();
+  const escaped = bossAlive();
+  const bossName = boss?.name ?? '';
+  const result = settle(run.cash, balls, finished, { bonus: beaten ? boss!.bonus : 0, penalty: escaped ? boss!.penalty : 0 });
   const rows = [
     billRow(`大獎 ${nightJackpots} 次・${moneyText(balls)} 珠換現金`, `+${moneyText(result.earned)} 元`, 'gain'),
-    billRow(`第 ${finished} 晚地頭費`, `−${moneyText(result.rent)} 元`, 'loss'),
   ];
+  if (beaten) rows.push(billRow(`打倒${bossName}`, `+${moneyText(result.bonus)} 元`, 'gain'));
+  rows.push(billRow(`第 ${finished} 晚地頭費`, `−${moneyText(result.rent)} 元`, 'loss'));
+  if (escaped) rows.push(billRow(`${bossName}的保護費`, `−${moneyText(result.penalty)} 元`, 'loss'));
+  boss = null;
+  bossHp = 0;
+  stage.bossBar.hide();
+  stage.title.visible = true;
   balls = 0;
   if (result.bankrupt) {
     run.best = Math.max(run.best, finished - 1);
     phase = 'bust';
     stage.board.paused = true;
-    rows.push(billRow('還差', `${moneyText(result.rent - run.cash - result.earned)} 元`, 'loss'));
+    rows.push(billRow('還差', `${moneyText(result.rent + result.penalty - run.cash - result.earned - result.bonus)} 元`, 'loss'));
     const best = run.best;
     run = newRun(best);
     saveRun();
@@ -269,8 +318,12 @@ function finishNight() {
   run.night = finished + 1;
   run.best = Math.max(run.best, finished);
   rows.push(billRow('手上現金', `${moneyText(run.cash)} 元`, 'total'));
-  const title = newTitleAt(finished);
-  const story = title ? `撐過 ${finished} 晚，新稱號：${title}！` : '繳清了。今晚賺的錢要留著，還是投資攤位？';
+  if (beaten) run.bossWins += 1;
+  const story = beaten
+    ? `打倒${bossName}，新稱號：${titleFor(run.bossWins)}！`
+    : escaped
+      ? `${bossName}收了保護費揚長而去，下次再算帳。`
+      : '繳清了。今晚賺的錢要留著，還是投資攤位？';
   enterDay(`第 ${finished} 晚收攤`, story, rows);
 }
 
@@ -282,6 +335,19 @@ function startNight() {
   closeArmed = false;
   closing = false;
   director.payoutScale = payoutScale(run.level);
+  boss = bossForNight(run.night);
+  bossHp = boss?.hp ?? 0;
+  if (boss) {
+    stage.bossBar.show(boss.name, boss.hp);
+    stage.title.visible = false;
+    audio.reachSting();
+    stage.shake(16, 0.4);
+    stage.flash(0xff2020, 0.35, 0.35);
+    stage.bigText(`地頭蛇 ${boss.name}`, 'red', { size: 78, y: 300, hold: 1.3, maxWidth: 660 });
+  } else {
+    stage.bossBar.hide();
+    stage.title.visible = true;
+  }
   stage.board.paused = false;
   stage.setHoldLamps(0);
   updateFireButton();
@@ -335,7 +401,7 @@ buyButton.addEventListener('click', () => {
 
 closeButton.addEventListener('click', () => {
   closeButton.blur();
-  const short = run.cash + ballsToCash(balls, run.night) < rentForNight(run.night);
+  const short = closingValue() < amountDue();
   if (short && !closeArmed) {
     closeArmed = true;
     renderHud();
@@ -421,5 +487,5 @@ window.__game = {
   shoot,
   roll,
   isRunning: () => running,
-  state: () => ({ phase, balls, closing, run }),
+  state: () => ({ phase, balls, closing, run, bossHp, boss }),
 };

@@ -4,6 +4,7 @@ import gsap from 'gsap';
 import { SYMBOL_COUNT } from './outcome';
 import { Agong, JiaoBlock, Lantern, ParadeStreet, Runner, loadArt, makeBackground, makePanel, makeSymbolTextures, makeTempleScene, type ArtBook } from './art';
 import { Board } from './board';
+import { BossBar } from './bossBar';
 import { BigText, type BigTextOptions, type TextLook } from './text';
 import { Burst, shockRing } from './fx';
 import type { AudioKit } from './audio';
@@ -182,6 +183,7 @@ export class Stage {
   overlay = new Container();
   bannerLayer = new Container();
   title!: BigText;
+  bossBar!: BossBar;
   particles: Particle[] = [];
   lightMode: LightMode = 'idle';
   streetSpeed = 0;
@@ -247,7 +249,8 @@ export class Stage {
     this.jiaoRight = new JiaoBlock(this.art, 'right');
     this.jiaoLayer.addChild(this.jiaoLeft.root, this.jiaoRight.root);
     this.jiaoLayer.visible = false;
-    this.world.addChild(this.jiaoLayer, this.overlay, this.particleLayer, this.bannerLayer);
+    this.bossBar = new BossBar();
+    this.world.addChild(this.jiaoLayer, this.overlay, this.particleLayer, this.bannerLayer, this.bossBar);
 
     this.ballTexture = this.art.ball;
     this.sparkTexture = this.app.renderer.generateTexture(new Graphics().circle(5, 5, 5).fill(0xffffff));

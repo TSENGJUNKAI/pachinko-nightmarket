@@ -7,6 +7,7 @@ import { HEIGHT, WIDTH, wait, type Stage } from './stage';
 import { BigText } from './text';
 import { makeTempleGate, makeText } from './art';
 import type { AudioKit } from './audio';
+import type { BossHit } from './boss';
 
 export interface RushResult {
   totalBalls: number;
@@ -21,6 +22,7 @@ const GAUGE = { x: 590, y: 985, target: 58 };
 
 export class RushMode {
   active = false;
+  onBossHit: (hit: BossHit) => void = () => undefined;
 
   private readonly hud = new Container();
   private readonly route = new Graphics();
@@ -209,6 +211,7 @@ export class RushMode {
 
   private async chainWin(hitNumber: number) {
     const { stage, audio } = this;
+    this.onBossHit('chain');
     audio.fanfare();
     audio.firecrackers(14);
     stage.burst.show('fire', { spin: 3, bolts: 9 });
@@ -269,6 +272,7 @@ export class RushMode {
 
   private async finale() {
     const { stage, audio } = this;
+    this.onBossHit('final');
     const gate = makeTempleGate(stage.art, 760);
     gate.position.set(WIDTH + 400, 860);
     stage.street.addChild(gate);

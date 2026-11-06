@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ECONOMY, ballPrice, ballsToCash, buyBalls, moneyText, newTitleAt, payoutScale, rentForNight, settle, titleFor, upgradeCost } from './economy';
+import { ECONOMY, ballPrice, ballsToCash, buyBalls, moneyText, payoutScale, rentForNight, settle, upgradeCost } from './economy';
 
 describe('地頭費和珠價', () => {
   it('第 1 晚的地頭費和珠價是起始值', () => {
@@ -33,7 +33,7 @@ describe('買珠和換現金', () => {
 
 describe('結算', () => {
   it('付得起就扣地頭費', () => {
-    expect(settle(1500, 500, 1)).toEqual({ rent: 1500, earned: 1600, cashAfter: 1600, bankrupt: false });
+    expect(settle(1500, 500, 1)).toEqual({ rent: 1500, earned: 1600, bonus: 0, penalty: 0, cashAfter: 1600, bankrupt: false });
   });
 
   it('剛好付清不算倒店', () => {
@@ -58,13 +58,6 @@ describe('攤位等級', () => {
 });
 
 describe('顯示', () => {
-  it('稱號只在里程碑那一晚才算新解鎖', () => {
-    expect(titleFor(0)).toBe('欠債的阿公');
-    expect(titleFor(8)).toBe('救回阿公的攤位');
-    expect(newTitleAt(7)).toBe('救回阿公的攤位');
-    expect(newTitleAt(8)).toBeNull();
-  });
-
   it('大數字換成中文單位', () => {
     expect(moneyText(12345)).toBe('12,345');
     expect(moneyText(250000)).toBe('25.0 萬');

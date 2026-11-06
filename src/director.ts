@@ -7,6 +7,7 @@ import type { AudioKit } from './audio';
 import type { BurstLook } from './fx';
 import type { TextLook } from './text';
 import { RushMode, type RushResult } from './rush';
+import type { BossHit } from './boss';
 
 interface StepCut {
   text: string;
@@ -45,6 +46,8 @@ export class Director {
   readonly rush: RushMode;
   // 攤位等級帶來的出珠倍率。
   payoutScale = 1;
+  // 打到地頭蛇的時機，由主程式決定怎麼算傷害。
+  onBossHit: (hit: BossHit) => void = () => undefined;
 
   constructor(
     private readonly stage: Stage,
@@ -55,6 +58,7 @@ export class Director {
     private readonly onTakeover: (active: boolean) => void,
   ) {
     this.rush = new RushMode(stage, audio, onRushChange);
+    this.rush.onBossHit = (hit) => this.onBossHit(hit);
   }
 
   async run(outcome: Outcome) {
@@ -103,7 +107,7 @@ export class Director {
     stage.agong.idle();
     stage.burst.hide();
     stage.machineFull();
-    stage.title.visible = true;
+    stage.title.visible = !stage.bossBar.visible;
     stage.temple.visible = false;
     stage.agong.moveTo(IDLE_AGONG.x, IDLE_AGONG.y, IDLE_AGONG.height, 0.3);
   }
@@ -112,6 +116,7 @@ export class Director {
   private async reachIntro() {
     const { stage, audio } = this;
     this.onTakeover(true);
+    this.onBossHit('reach');
     stage.reels.center.slowTo(9, 0.5);
     audio.music('reach', 0);
     audio.reachSting();
@@ -295,6 +300,7 @@ export class Director {
   private async jackpot(outcome: Outcome) {
     const { stage, audio } = this;
     const { agong } = stage;
+    this.onBossHit('jackpot');
     audio.music(null);
     audio.fanfare();
     audio.firecrackers(20);

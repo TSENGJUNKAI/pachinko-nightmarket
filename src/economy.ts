@@ -44,21 +44,11 @@ export function buyBalls(cash: number, night: number): { balls: number; cost: nu
   return { balls, cost: balls * unit };
 }
 
-const TITLES: Array<[number, string]> = [
-  [35, '全台廟會總舖師'],
-  [28, '夜市之王'],
-  [21, '珍奶巷霸主'],
-  [14, '香腸街老大'],
-  [7, '救回阿公的攤位'],
-  [0, '欠債的阿公'],
-];
+// 稱號靠打倒地頭蛇取得，索引是打贏的次數。
+const TITLES = ['欠債的阿公', '救回阿公的攤位', '香腸街老大', '珍奶巷霸主', '夜市之王', '全台廟會總舖師'];
 
-export function titleFor(nightsSurvived: number): string {
-  return TITLES.find(([nights]) => nightsSurvived >= nights)![1];
-}
-
-export function newTitleAt(nightsSurvived: number): string | null {
-  return TITLES.some(([nights]) => nights > 0 && nights === nightsSurvived) ? titleFor(nightsSurvived) : null;
+export function titleFor(bossWins: number): string {
+  return TITLES[Math.min(bossWins, TITLES.length - 1)];
 }
 
 // 數字太大時改用萬、億、兆，面板才放得下。
@@ -78,22 +68,26 @@ export interface RunState {
   cash: number;
   level: number;
   best: number;
+  bossWins: number;
 }
 
 export function newRun(best = 0): RunState {
-  return { night: 1, cash: ECONOMY.startCash, level: 1, best };
+  return { night: 1, cash: ECONOMY.startCash, level: 1, best, bossWins: 0 };
 }
 
 export interface Settlement {
   rent: number;
   earned: number;
+  bonus: number;
+  penalty: number;
   cashAfter: number;
   bankrupt: boolean;
 }
 
-export function settle(cash: number, balls: number, night: number): Settlement {
+export function settle(cash: number, balls: number, night: number, { bonus = 0, penalty = 0 }: { bonus?: number; penalty?: number } = {}): Settlement {
   const earned = ballsToCash(balls, night);
   const rent = rentForNight(night);
-  const total = cash + earned;
-  return { rent, earned, cashAfter: Math.max(0, total - rent), bankrupt: total < rent };
+  const total = cash + earned + bonus;
+  const due = rent + penalty;
+  return { rent, earned, bonus, penalty, cashAfter: Math.max(0, total - due), bankrupt: total < due };
 }
