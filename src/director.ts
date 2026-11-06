@@ -9,7 +9,10 @@ import type { TextLook } from './text';
 import { RushMode, type RushResult } from './rush';
 import type { BossHit } from './boss';
 
+const GOLDEN_TINT = 0xffd257;
+
 interface StepCut {
+  id: string;
   text: string;
   look: TextLook;
   burst: BurstLook;
@@ -19,10 +22,10 @@ interface StepCut {
 
 // 預告分段升級：越高段字越大、越誇張。藍最低，金最高；彩虹留給三聖筊。
 const STEP_CUTS: StepCut[] = [
-  { text: '機會', look: 'blue', burst: 'blue', light: 'blue', lantern: 0x3d86e0 },
-  { text: '好運', look: 'green', burst: 'green', light: 'green', lantern: 0x2fe06a },
-  { text: '激熱', look: 'red', burst: 'red', light: 'red', lantern: 0xff2b2b },
-  { text: '超激熱', look: 'fire', burst: 'fire', light: 'gold', lantern: 0xffd257 },
+  { id: 'chance', text: '機會', look: 'blue', burst: 'blue', light: 'blue', lantern: 0x3d86e0 },
+  { id: 'luck', text: '好運', look: 'green', burst: 'green', light: 'green', lantern: 0x2fe06a },
+  { id: 'hot', text: '激熱', look: 'red', burst: 'red', light: 'red', lantern: 0xff2b2b },
+  { id: 'superhot', text: '超激熱', look: 'fire', burst: 'fire', light: 'gold', lantern: 0xffd257 },
 ];
 
 const STEPS_BY_TIER: Record<Tier, number> = { blue: 1, red: 3, gold: 4 };
@@ -48,6 +51,8 @@ export class Director {
   payoutScale = 1;
   // 打到地頭蛇的時機，由主程式決定怎麼算傷害。
   onBossHit: (hit: BossHit) => void = () => undefined;
+  // 演出第一次出現時收進圖鑑。
+  onSeen: (id: string) => void = () => undefined;
 
   constructor(
     private readonly stage: Stage,
@@ -58,7 +63,10 @@ export class Director {
     private readonly onTakeover: (active: boolean) => void,
   ) {
     this.rush = new RushMode(stage, audio, onRushChange);
-    this.rush.onBossHit = (hit) => this.onBossHit(hit);
+    this.rush.onBossHit = (hit) => {
+      this.onBossHit(hit);
+      this.onSeen(hit === 'final' ? 'temple' : 'chain');
+    };
   }
 
   async run(outcome: Outcome) {
@@ -66,6 +74,7 @@ export class Director {
     stage.clearBanners();
     this.resetLights();
     audio.music('idle');
+    if (outcome.announce) await this.announce();
     stage.lightMode = 'spin';
     audio.lever();
     stage.reels.left.spin();
@@ -85,12 +94,46 @@ export class Director {
     }
 
     await this.reachIntro();
+    if (outcome.golden) await this.goldenAgong();
     await this.stepUp(outcome.tier ?? 'blue');
     const sacred = await this.throwAllJiao(outcome);
     await this.resolveCenter(outcome, sacred);
 
     if (outcome.hit) await this.jackpot(outcome);
     else await this.loss();
+  }
+
+  // 一發告知：轉盤還沒動，全黑一聲鑼就告訴你中了。
+  private async announce() {
+    const { stage, audio } = this;
+    this.onSeen('announce');
+    this.onTakeover(true);
+    audio.music(null);
+    stage.setAmbient(0x000000, 0.92, 0.08);
+    audio.heartbeat();
+    await wait(0.9);
+    audio.rainbowSting();
+    stage.flash(0xffffff, 0.8, 0.4);
+    stage.shake(26, 0.5);
+    stage.bigText('一發告知', 'rainbow', { size: 130, y: 440, hold: 1.3, maxWidth: 660 });
+    await wait(1.6);
+    stage.setAmbient(0x000000, 0, 0.2);
+  }
+
+  // 金色阿公：出現就必中。
+  private async goldenAgong() {
+    const { stage, audio } = this;
+    this.onSeen('golden');
+    audio.rainbowSting();
+    audio.firecrackers(8);
+    stage.agong.root.tint = GOLDEN_TINT;
+    stage.agong.dance();
+    stage.flash(0xffe27a, 0.8, 0.5);
+    stage.shake(26, 0.6);
+    stage.sparks(WIDTH / 2, 800, 180, [0xffd257, 0xffffff], 620);
+    stage.bigText('金色阿公', 'fire', { size: 150, y: 420, hold: 1.3, maxWidth: 680 });
+    stage.agong.say('今晚是我的！', 1.5);
+    await wait(1.7);
   }
 
   private async stopReel(name: 'left' | 'right' | 'center', symbol: number) {
@@ -105,6 +148,7 @@ export class Director {
     stage.setLanterns(0xff2a20);
     stage.pulseCenter(0xffffff, false);
     stage.agong.idle();
+    stage.agong.root.tint = 0xffffff;
     stage.burst.hide();
     stage.machineFull();
     stage.title.visible = !stage.bossBar.visible;
@@ -141,6 +185,7 @@ export class Director {
     stage.agong.moveTo(470, 1085, 640, 0.25);
     for (let i = 0; i < count; i += 1) {
       const cut = STEP_CUTS[i];
+      this.onSeen(cut.id);
       const top = i === count - 1;
       const size = 150 + i * 42;
       audio.stepSting(i);
@@ -189,12 +234,14 @@ export class Director {
       if (sacred === 2) stage.setAmbient(0x000000, 0, 0.1);
       if (result !== 'sheng') {
         audio.jiaoBad();
+        this.onSeen(result);
         stage.bigText(JIAO_INFO[result].text, 'silver', { size: 150, y: 470, hold: 0.7 });
         await wait(1.05);
         break;
       }
       sacred += 1;
       audio.jiaoGood(sacred);
+      this.onSeen(sacred === 3 ? 'triple' : `sheng${sacred}`);
       audio.intensity(sacred);
       stage.shake(10 + sacred * 7, 0.35);
       stage.sparks(510, 860, 40 + sacred * 28, [0xffd257, 0xffffff]);
@@ -288,6 +335,7 @@ export class Director {
     stage.burst.show('dark', { spin: 0 });
     await wait(1.7);
     audio.revive();
+    this.onSeen('revive');
     stage.burst.show('fire', { spin: 3, bolts: 12 });
     stage.flash(0xffffff, 0.8, 0.45);
     stage.shake(30, 0.6);
@@ -301,6 +349,7 @@ export class Director {
     const { stage, audio } = this;
     const { agong } = stage;
     this.onBossHit('jackpot');
+    this.onSeen('jackpot');
     audio.music(null);
     audio.fanfare();
     audio.firecrackers(20);
@@ -325,6 +374,7 @@ export class Director {
     await this.countBalls(0, round, 2.6, (value) => this.replaceCounter(counter, value));
     this.dropCounter();
     stopParty();
+    this.onSeen('rush');
 
     const rush: RushResult = await this.rush.play(outcome.rush ?? { hitSpins: [], reachedFinal: false }, round, this.payoutScale);
 

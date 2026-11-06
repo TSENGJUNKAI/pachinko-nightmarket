@@ -21,7 +21,18 @@ export interface RushPlan {
   reachedFinal: boolean;
 }
 
+// 機台和當晚加成會改的機率。
+export interface Tune {
+  hitRate: number;
+  reachOnMiss: number;
+  comebackRate: number;
+  rushSpinHitRate: number;
+}
+
 export interface Outcome {
+  // 隱藏演出，只出現在中獎時。
+  golden: boolean;
+  announce: boolean;
   hit: boolean;
   reach: boolean;
   reels: ReelResult;
@@ -36,6 +47,8 @@ export const CONFIG = {
   hitRate: 1 / 30,
   reachOnMiss: 0.2,
   comebackRate: 0.15,
+  goldenRate: 0.04,
+  announceRate: 0.05,
   // 每次轉動約 9.5%，8 次內至少中一次的機率約 55%。
   rushSpinHitRate: 0.095,
   ballsPerRound: 700,
@@ -84,6 +97,8 @@ interface Forced {
   sacred?: number;
   comeback?: boolean;
   rush?: RushForce;
+  golden?: boolean;
+  announce?: boolean;
 }
 
 const FORCED: Record<string, Forced> = {
@@ -94,11 +109,13 @@ const FORCED: Record<string, Forced> = {
   comeback: { hit: true, tier: 'red', sacred: 1, comeback: true, rush: 'none' },
   superHit: { hit: true, tier: 'gold', sacred: 3, comeback: false, rush: 2 },
   rushFinal: { hit: true, tier: 'red', sacred: 1, comeback: false, rush: 'all' },
+  golden: { hit: true, tier: 'gold', sacred: 2, comeback: false, rush: 'none', golden: true, announce: false },
+  announce: { hit: true, tier: 'red', sacred: 2, comeback: false, rush: 'none', golden: false, announce: true },
 };
 
 export const forcedModes = Object.keys(FORCED);
 
-export function rollRush(rng: Rng = Math.random, force?: RushForce): RushPlan {
+export function rollRush(rng: Rng = Math.random, force?: RushForce, spinHitRate: number = CONFIG.rushSpinHitRate): RushPlan {
   const needed = RUSH_STOPS.length - 1;
   const hitSpins: number[] = [];
   const pickSpin = () => 1 + Math.floor(rng() * RUSH_SPINS);
@@ -113,7 +130,7 @@ export function rollRush(rng: Rng = Math.random, force?: RushForce): RushPlan {
   while (hitSpins.length < needed) {
     let spinHit = 0;
     for (let spin = 1; spin <= RUSH_SPINS; spin += 1) {
-      if (rng() < CONFIG.rushSpinHitRate) {
+      if (rng() < spinHitRate) {
         spinHit = spin;
         break;
       }
@@ -137,13 +154,14 @@ export function rushSpinReels(hit: boolean, rng: Rng = Math.random): ReelResult 
 }
 
 // force 只給演出測試用，正式玩法不會傳入。
-export function roll(rng: Rng = Math.random, force = ''): Outcome {
+export function roll(rng: Rng = Math.random, force = '', tune: Partial<Tune> = {}): Outcome {
   const forced = FORCED[force] ?? {};
-  const hit = forced.hit ?? rng() < CONFIG.hitRate;
-  const reach = hit || (forced.reach ?? rng() < CONFIG.reachOnMiss);
+  const rates = { ...CONFIG, ...tune };
+  const hit = forced.hit ?? rng() < rates.hitRate;
+  const reach = hit || (forced.reach ?? rng() < rates.reachOnMiss);
 
   if (!reach) {
-    return { hit: false, reach: false, reels: missReels(rng), tier: null, jiao: [], comebackFrom: null, rush: null };
+    return { golden: false, announce: false, hit: false, reach: false, reels: missReels(rng), tier: null, jiao: [], comebackFrom: null, rush: null };
   }
 
   const key = hit ? 'hit' : 'miss';
@@ -156,15 +174,17 @@ export function roll(rng: Rng = Math.random, force = ''): Outcome {
   const base = randomSymbol(rng);
   // 差一格最折磨人：沒中時停在中獎圖案的前一格或後一格。
   const center = hit ? base : mod(base + (rng() < 0.5 ? -1 : 1), SYMBOL_COUNT);
-  const comeback = hit && (forced.comeback ?? rng() < CONFIG.comebackRate);
+  const comeback = hit && (forced.comeback ?? rng() < rates.comebackRate);
 
   return {
+    golden: hit && (forced.golden ?? rng() < CONFIG.goldenRate),
+    announce: hit && (forced.announce ?? rng() < CONFIG.announceRate),
     hit,
     reach: true,
     reels: { left: base, right: base, center },
     tier,
     jiao,
     comebackFrom: comeback ? mod(base - 1, SYMBOL_COUNT) : null,
-    rush: hit ? rollRush(rng, forced.rush) : null,
+    rush: hit ? rollRush(rng, forced.rush, rates.rushSpinHitRate) : null,
   };
 }

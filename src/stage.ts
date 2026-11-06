@@ -189,6 +189,7 @@ export class Stage {
   streetSpeed = 0;
   onUpdate: ((delta: number) => void) | null = null;
 
+  private machineRing!: Sprite;
   private lanterns: Lantern[] = [];
   private bulbs: Graphics[] = [];
   private ambient = new Graphics().rect(0, 0, WIDTH, HEIGHT).fill(0xffffff);
@@ -263,6 +264,11 @@ export class Stage {
     return this;
   }
 
+  // 新機台的外框圖還沒產，先用染色區分。
+  setMachineTint(tint: number) {
+    this.machineRing.tint = tint;
+  }
+
   private buildMachine(audio: AudioKit) {
     const panel = makePanel(PANEL.x, PANEL.y, PANEL.w, PANEL.h);
     this.bulbs = panel.bulbs;
@@ -295,6 +301,7 @@ export class Stage {
     ring.position.set(PANEL.x - RING_MARGIN.x, PANEL.y - RING_MARGIN.y);
     ring.width = PANEL.w + RING_MARGIN.x * 2;
     ring.height = PANEL.h + RING_MARGIN.y * 2;
+    this.machineRing = ring;
 
     this.machine.addChild(panel.panel, reelLayer, mask, payline, ring, panel.bulbLayer, this.centerGlow);
     // 以面板中心為軸心，縮小時才會留在預期位置。

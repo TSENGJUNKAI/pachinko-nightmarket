@@ -6,8 +6,11 @@ import { AudioKit } from './audio';
 import { Stage } from './stage';
 import { Director } from './director';
 import { loadFonts } from './text';
+import { BOOK, BOOK_FAME, BOOK_STEP, BOOK_TOTAL, FAME_PER_BOSS, FAME_PER_NIGHT, markSeen, newMeta, type Meta } from './collection';
+import { EVENTS, FORTUNES, NEUTRAL, canAfford, combineMods, describeMods, drawEvent, drawFortune, resolveOption, type EventOption } from './fortune';
+import { MACHINES, isUnlocked, machineById } from './machines';
 import { BOSS_DAMAGE, bossForNight, type Boss, type BossHit } from './boss';
-import { ECONOMY, ballPrice, ballsToCash, buyBalls, moneyText, newRun, payoutScale, rentForNight, settle, titleFor, upgradeCost, type RunState } from './economy';
+import { ECONOMY, ballPrice, ballsToCash, buyBalls, moneyText, newRun, payoutScale, rentForNight, settle, titleFor, upgradeCost, type RunState, type Today } from './economy';
 
 function el<T extends HTMLElement>(id: string) {
   return document.getElementById(id) as T;
@@ -29,6 +32,8 @@ const stallPanel = el('stall-panel');
 const upgradeButton = el<HTMLButtonElement>('upgrade');
 const openButton = el<HTMLButtonElement>('open-night');
 const restartButton = el<HTMLButtonElement>('restart');
+const bookButton = el<HTMLButtonElement>('open-book');
+const toastBox = el('toast');
 
 await loadFonts();
 
@@ -36,6 +41,7 @@ const audio = new AudioKit();
 const stage = await new Stage().init(el('canvas-slot'), audio);
 
 const SAVE_KEY = 'agong-stall-save';
+const META_KEY = 'agong-stall-meta';
 const INTRO_STORY = '阿公欠下地頭費。每晚收攤都要繳錢，繳不出來攤位就沒了。先買珠，再開始打。';
 
 function loadRun(): RunState {
@@ -56,7 +62,24 @@ function saveRun() {
   }
 }
 
+function loadMeta(): Meta {
+  try {
+    return { ...newMeta(), ...(JSON.parse(localStorage.getItem(META_KEY) ?? 'null') as Partial<Meta> | null) };
+  } catch {
+    return newMeta();
+  }
+}
+
+function saveMeta() {
+  try {
+    localStorage.setItem(META_KEY, JSON.stringify(meta));
+  } catch {
+    // 同上，存不了就算了。
+  }
+}
+
 let run = loadRun();
+const meta = loadMeta();
 type Phase = 'day' | 'night' | 'bust';
 let phase: Phase = 'day';
 let balls = 0;
@@ -70,20 +93,59 @@ let bossHp = 0;
 const bossAlive = () => boss !== null && bossHp > 0;
 const bossDead = () => boss !== null && bossHp <= 0;
 
+const mods = () => run.today?.mods ?? NEUTRAL;
+const machine = () => {
+  const picked = machineById(meta.machine);
+  return isUnlocked(picked, meta.fame) ? picked : MACHINES[0];
+};
+
+function tune() {
+  const m = machine();
+  const night = mods();
+  return {
+    hitRate: Math.min(0.5, m.hitRate * night.hit),
+    reachOnMiss: Math.min(0.6, m.reachOnMiss * night.reach),
+    comebackRate: m.comebackRate,
+    rushSpinHitRate: Math.min(0.5, m.rushSpinHitRate * night.rush),
+  };
+}
+
+function rentDue() {
+  return Math.round(rentForNight(run.night) * mods().rent);
+}
+
 function amountDue() {
-  return rentForNight(run.night) + (bossAlive() ? boss!.penalty : 0);
+  return rentDue() + (bossAlive() ? boss!.penalty : 0);
 }
 
 function closingValue() {
-  return run.cash + ballsToCash(balls, run.night) + (bossDead() ? boss!.bonus : 0);
+  return run.cash + ballsToCash(balls, run.night, mods().sell) + (bossDead() ? boss!.bonus : 0) + (run.today?.repay ?? 0);
+}
+
+let toastTween: gsap.core.Tween | null = null;
+
+function toast(text: string) {
+  toastTween?.kill();
+  toastBox.textContent = text;
+  toastBox.hidden = false;
+  toastTween = gsap.fromTo(toastBox, { opacity: 1 }, { opacity: 0, delay: 1.6, duration: 0.4, onComplete: () => { toastBox.hidden = true; } });
+}
+
+function seen(id: string) {
+  const fame = markSeen(meta, id);
+  if (fame === null) return;
+  saveMeta();
+  const label = BOOK.flatMap((group) => group.entries).find((entry) => entry.id === id)?.name ?? '';
+  toast(fame ? `圖鑑滿 ${meta.seen.length} 項，名氣 +${BOOK_FAME}！` : `圖鑑新增：${label}`);
 }
 
 function hitBoss(hit: BossHit) {
   if (!boss || bossHp <= 0) return;
-  const amount = BOSS_DAMAGE[hit];
+  const amount = Math.round(BOSS_DAMAGE[hit] * mods().boss);
   bossHp -= amount;
   stage.bossBar.hit(bossHp, amount);
   if (bossHp <= 0) {
+    seen('beat');
     audio.rainbowSting();
     audio.firecrackers(12);
     stage.flash(0xffffff, 0.55, 0.4);
@@ -107,9 +169,10 @@ function renderHud() {
   el('stat-balls').textContent = moneyText(balls);
   el('stat-rent').textContent = moneyText(rent);
   el('stat-level').textContent = String(run.level);
+  el('night-mods').textContent = [machine().name, ...(run.today ? [FORTUNES[run.today.fortune].rank, describeMods(run.today.mods)] : [])].join('｜');
   const canAct = phase === 'night' && !closing;
-  el('buy-cost').textContent = `−${moneyText(ballPrice(run.night) * ECONOMY.buyBalls)} 元`;
-  buyButton.disabled = !canAct || buyBalls(run.cash, run.night).balls === 0;
+  el('buy-cost').textContent = `−${moneyText(Math.ceil(ballPrice(run.night) * mods().price) * ECONOMY.buyBalls)} 元`;
+  buyButton.disabled = !canAct || buyBalls(run.cash, run.night, mods().price).balls === 0;
   closeButton.disabled = !canAct;
   if (value >= rent) closeArmed = false;
   closeButton.textContent = closing ? '收攤中…' : closeArmed ? '再按倒店' : '收攤';
@@ -146,6 +209,7 @@ const director = new Director(
   audio,
   ({ win, balls: won }) => {
     nightJackpots += win;
+    if (nightJackpots >= 3) seen('hotnight');
     balls += won;
     renderHud();
   },
@@ -158,6 +222,7 @@ const director = new Director(
 );
 
 director.onBossHit = hitBoss;
+director.onSeen = seen;
 
 // 保留：進洞的珠子排隊，最多 4 顆，一次演一個結果。
 const MAX_HOLD = 4;
@@ -171,7 +236,7 @@ async function runQueue() {
     const force = queue.shift() ?? '';
     stage.setHoldLamps(queue.length);
     hitBoss('spin');
-    await director.run(roll(Math.random, force));
+    await director.run(roll(Math.random, force, tune()));
   }
   running = false;
 }
@@ -198,7 +263,7 @@ function shoot() {
   if (balls <= 0) {
     stopFiring();
     // 沒珠也沒錢，今晚只能收攤了。
-    if (buyBalls(run.cash, run.night).balls === 0) {
+    if (buyBalls(run.cash, run.night, mods().price).balls === 0) {
       beginClosing();
       return;
     }
@@ -243,8 +308,130 @@ function billRow(label: string, value: string, kind = '') {
   return row;
 }
 
+function renderMachines() {
+  const row = el('machine-row');
+  const current = machine();
+  row.replaceChildren(...MACHINES.map((item) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    const open = isUnlocked(item, meta.fame);
+    button.textContent = item.name;
+    button.disabled = !open;
+    button.classList.toggle('picked', item.id === current.id);
+    button.setAttribute('aria-pressed', String(item.id === current.id));
+    if (!open) {
+      const need = document.createElement('small');
+      need.textContent = `名氣 ${item.fame} 解鎖`;
+      button.append(need);
+    }
+    button.addEventListener('click', () => {
+      meta.machine = item.id;
+      saveMeta();
+      audio.reelStop();
+      renderHud();
+      renderMachines();
+    });
+    return button;
+  }));
+  el('machine-desc').textContent = current.desc;
+  stage.setMachineTint(current.tint);
+}
+
+function eventOptionButton(option: EventOption, rent: number, today: Today) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.textContent = option.label;
+  const notes: string[] = [];
+  if (option.cost) notes.push(`−${moneyText(Math.round(option.cost * rent))} 元`);
+  if (option.gain) notes.push(`+${moneyText(Math.round(option.gain * rent))} 元`);
+  if (option.repay) notes.push(`收攤拿回 ${moneyText(Math.round(option.repay * rent))} 元`);
+  if (option.gamble) notes.push(`一半機率拿回 ${moneyText(Math.round(option.gamble.payback * rent))} 元`);
+  if (option.fame) notes.push(`名氣 +${option.fame}`);
+  if (option.mods) notes.push(describeMods(option.mods));
+  if (notes.length) {
+    const note = document.createElement('small');
+    note.textContent = notes.join('・');
+    button.append(note);
+  }
+  button.disabled = !canAfford(option, run.cash, rent);
+  button.addEventListener('click', () => {
+    const result = resolveOption(option, rent, Math.random);
+    run.cash += result.cashDelta;
+    meta.fame += result.fame;
+    today.repay += result.repay;
+    today.mods = combineMods(today.mods, result.mods);
+    today.chosen = true;
+    today.result = result.text;
+    saveRun();
+    saveMeta();
+    audio.reelStop();
+    renderHud();
+    renderStall();
+    openButton.focus();
+  });
+  return button;
+}
+
+function renderToday() {
+  const today = run.today;
+  const fortuneBox = el('fortune-box');
+  const eventBox = el('event-box');
+  fortuneBox.hidden = !today;
+  eventBox.hidden = !today || today.event === null;
+  if (!today) {
+    openButton.disabled = false;
+    openButton.textContent = '抽今晚的籤';
+    return;
+  }
+  const fortune = FORTUNES[today.fortune];
+  fortuneBox.classList.toggle('low', fortune.rank.startsWith('下'));
+  el('fortune-rank').textContent = fortune.rank;
+  el('fortune-verse').textContent = fortune.verse;
+  el('fortune-effect').textContent = describeMods(fortune.mods);
+  openButton.disabled = today.event !== null && !today.chosen;
+  openButton.textContent = openButton.disabled ? '先決定事件' : `開市：第 ${run.night} 晚`;
+  if (today.event === null) return;
+  const event = EVENTS[today.event];
+  el('event-title').textContent = event.title;
+  el('event-text').textContent = today.chosen ? today.result : event.text;
+  const rent = rentForNight(run.night);
+  el('event-options').replaceChildren(...(today.chosen ? [] : event.options.map((option) => eventOptionButton(option, rent, today))));
+}
+
+function drawToday() {
+  const fortune = drawFortune(Math.random);
+  const event = drawEvent(Math.random, run.night);
+  run.today = { fortune, event, chosen: false, result: '', mods: combineMods(NEUTRAL, FORTUNES[fortune].mods), repay: 0 };
+  seen(`fortune-${fortune}`);
+  if (event !== null) seen(`event-${event}`);
+  saveRun();
+  if (FORTUNES[fortune].rank.startsWith('下')) audio.jiaoBad();
+  else audio.jiaoGood(FORTUNES[fortune].rank === '上上籤' ? 3 : 1);
+  renderStall();
+}
+
+function renderBook() {
+  el('book-count').textContent = `${meta.seen.length} / ${BOOK_TOTAL}`;
+  el('book-hint').textContent = `每收集 ${BOOK_STEP} 項，名氣 +${BOOK_FAME}。倒店也不會清掉。`;
+  el('book-groups').replaceChildren(...BOOK.flatMap((group) => {
+    const heading = document.createElement('h3');
+    heading.textContent = group.title;
+    const list = document.createElement('div');
+    list.className = 'book-list';
+    list.append(...group.entries.map((entry) => {
+      const chip = document.createElement('span');
+      const known = meta.seen.includes(entry.id);
+      chip.textContent = known ? entry.name : '？？？';
+      chip.classList.toggle('unseen', !known);
+      return chip;
+    }));
+    return [heading, list];
+  }));
+}
+
 function renderStall() {
   const cost = upgradeCost(run.level);
+  el('stall-fame').textContent = String(meta.fame);
   el('stall-level').textContent = String(run.level);
   el('stall-scale').textContent = `×${payoutScale(run.level).toFixed(1)}`;
   el('stall-title').textContent = titleFor(run.bossWins);
@@ -254,8 +441,9 @@ function renderStall() {
   if (next) note.textContent = `今晚地頭蛇「${next.name}」來收保護費！血量 ${next.hp}。收攤前打倒可賺 ${moneyText(next.bonus)} 元，打不倒要多繳 ${moneyText(next.penalty)} 元。`;
   upgradeButton.textContent = `升級攤位　−${moneyText(cost)} 元`;
   upgradeButton.disabled = run.cash < cost;
-  el('next-rent').textContent = `第 ${run.night} 晚：地頭費 ${moneyText(rentForNight(run.night))} 元，珠價每顆 ${moneyText(ballPrice(run.night))} 元`;
-  openButton.textContent = `開市：第 ${run.night} 晚`;
+  el('next-rent').textContent = `第 ${run.night} 晚：地頭費 ${moneyText(rentDue())} 元，珠價每顆 ${moneyText(Math.ceil(ballPrice(run.night) * mods().price))} 元`;
+  renderMachines();
+  renderToday();
 }
 
 function showScreen(title: string, story: string, rows: HTMLElement[]) {
@@ -269,7 +457,11 @@ function showScreen(title: string, story: string, rows: HTMLElement[]) {
   restartButton.textContent = '放棄這局，重新開始';
   screen.hidden = false;
   if (phase !== 'bust') renderStall();
-  else openButton.textContent = '重新開張';
+  else {
+    openButton.disabled = false;
+    openButton.textContent = '重新開張';
+  }
+  bookButton.textContent = `演出圖鑑 ${meta.seen.length}/${BOOK_TOTAL}`;
   openButton.focus();
 }
 
@@ -289,11 +481,14 @@ function finishNight() {
   const beaten = bossDead();
   const escaped = bossAlive();
   const bossName = boss?.name ?? '';
-  const result = settle(run.cash, balls, finished, { bonus: beaten ? boss!.bonus : 0, penalty: escaped ? boss!.penalty : 0 });
+  const bossBonus = beaten ? boss!.bonus : 0;
+  const repay = run.today?.repay ?? 0;
+  const result = settle(run.cash, balls, finished, { bonus: bossBonus + repay, penalty: escaped ? boss!.penalty : 0, rentScale: mods().rent, sellScale: mods().sell });
   const rows = [
     billRow(`大獎 ${nightJackpots} 次・${moneyText(balls)} 珠換現金`, `+${moneyText(result.earned)} 元`, 'gain'),
   ];
-  if (beaten) rows.push(billRow(`打倒${bossName}`, `+${moneyText(result.bonus)} 元`, 'gain'));
+  if (beaten) rows.push(billRow(`打倒${bossName}`, `+${moneyText(bossBonus)} 元`, 'gain'));
+  if (repay) rows.push(billRow('老朋友還錢', `+${moneyText(repay)} 元`, 'gain'));
   rows.push(billRow(`第 ${finished} 晚地頭費`, `−${moneyText(result.rent)} 元`, 'loss'));
   if (escaped) rows.push(billRow(`${bossName}的保護費`, `−${moneyText(result.penalty)} 元`, 'loss'));
   boss = null;
@@ -301,6 +496,15 @@ function finishNight() {
   stage.bossBar.hide();
   stage.title.visible = true;
   balls = 0;
+  run.today = null;
+  const fameBefore = meta.fame;
+  if (beaten) meta.fame += FAME_PER_BOSS;
+  if (!result.bankrupt) meta.fame += FAME_PER_NIGHT;
+  const fameGain = meta.fame - fameBefore;
+  const unlocked = MACHINES.filter((item) => item.fame > fameBefore && item.fame <= meta.fame);
+  const unlockNote = unlocked.length ? ` 解鎖新機台：${unlocked.map((item) => item.name).join('、')}！` : '';
+  saveMeta();
+  if (fameGain) rows.push(billRow('名氣', `+${fameGain}`, 'gain'));
   if (result.bankrupt) {
     run.best = Math.max(run.best, finished - 1);
     phase = 'bust';
@@ -311,7 +515,7 @@ function finishNight() {
     saveRun();
     updateFireButton();
     renderHud();
-    showScreen('倒店了', `撐過 ${finished - 1} 晚，最高紀錄 ${best} 晚。阿公收起攤子，明天再來過。`, rows);
+    showScreen('倒店了', `撐過 ${finished - 1} 晚，最高紀錄 ${best} 晚。阿公收起攤子，明天再來過。名氣 ${meta.fame} 和圖鑑都留著。${unlockNote}`, rows);
     return;
   }
   run.cash = result.cashAfter;
@@ -324,7 +528,7 @@ function finishNight() {
     : escaped
       ? `${bossName}收了保護費揚長而去，下次再算帳。`
       : '繳清了。今晚賺的錢要留著，還是投資攤位？';
-  enterDay(`第 ${finished} 晚收攤`, story, rows);
+  enterDay(`第 ${finished} 晚收攤`, story + unlockNote, rows);
 }
 
 function startNight() {
@@ -334,10 +538,14 @@ function startNight() {
   nightJackpots = 0;
   closeArmed = false;
   closing = false;
-  director.payoutScale = payoutScale(run.level);
+  const picked = machine();
+  director.payoutScale = payoutScale(run.level) * picked.payout * mods().payout;
+  stage.setMachineTint(picked.tint);
+  if (picked.id !== 'old') seen(`machine-${picked.id}`);
   boss = bossForNight(run.night);
   bossHp = boss?.hp ?? 0;
   if (boss) {
+    seen(`boss-${boss.name}`);
     stage.bossBar.show(boss.name, boss.hp);
     stage.title.visible = false;
     audio.reachSting();
@@ -361,6 +569,10 @@ openButton.addEventListener('click', () => {
     enterDay('第 1 晚', INTRO_STORY);
     return;
   }
+  if (!run.today) {
+    drawToday();
+    return;
+  }
   startNight();
 });
 
@@ -374,6 +586,15 @@ upgradeButton.addEventListener('click', () => {
   audio.reelStop();
   renderHud();
   renderStall();
+});
+
+bookButton.addEventListener('click', () => {
+  renderBook();
+  el('book').hidden = false;
+});
+el('close-book').addEventListener('click', () => {
+  el('book').hidden = true;
+  openButton.focus();
 });
 
 // 按兩次才算數，避免誤按把進度清掉。
@@ -390,7 +611,7 @@ restartButton.addEventListener('click', () => {
 
 buyButton.addEventListener('click', () => {
   audio.unlock();
-  const { balls: bought, cost } = buyBalls(run.cash, run.night);
+  const { balls: bought, cost } = buyBalls(run.cash, run.night, mods().price);
   if (phase !== 'night' || closing || bought === 0) return;
   run.cash -= cost;
   balls += bought;
@@ -487,5 +708,5 @@ window.__game = {
   shoot,
   roll,
   isRunning: () => running,
-  state: () => ({ phase, balls, closing, run, bossHp, boss }),
+  state: () => ({ phase, balls, closing, run, bossHp, boss, meta, tune: tune() }),
 };

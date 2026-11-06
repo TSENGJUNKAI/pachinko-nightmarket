@@ -1,5 +1,7 @@
 // 金錢規則：買珠、換現金、地頭費和攤位等級。這個檔案不碰畫面，調數值只改這裡。
 
+import type { NightMods } from './fortune';
+
 export const ECONOMY = {
   startCash: 4000,
   buyBalls: 100,
@@ -11,14 +13,17 @@ export const ECONOMY = {
   entryBalls: 1,
   firstRent: 1500,
   rentGrowth: 1.55,
+  lateRentFrom: 14,
+  lateRentGrowth: 1.25,
   firstUpgradeCost: 5000,
   upgradeCostGrowth: 3,
   payoutGrowth: 1.25,
 } as const;
 
-// 地頭費收到整百，帳單上比較好看。
+// 地頭費收到整百，帳單上比較好看。撐過前期後漲得更快，滾雪球的人也會有壓力。
 export function rentForNight(night: number): number {
-  return Math.round((ECONOMY.firstRent * ECONOMY.rentGrowth ** (night - 1)) / 100) * 100;
+  const late = ECONOMY.lateRentGrowth ** Math.max(0, night - ECONOMY.lateRentFrom);
+  return Math.round((ECONOMY.firstRent * ECONOMY.rentGrowth ** (night - 1) * late) / 100) * 100;
 }
 
 export function ballPrice(night: number): number {
@@ -33,13 +38,13 @@ export function upgradeCost(level: number): number {
   return Math.round((ECONOMY.firstUpgradeCost * ECONOMY.upgradeCostGrowth ** (level - 1)) / 100) * 100;
 }
 
-export function ballsToCash(balls: number, night: number): number {
-  return Math.floor(balls * ballPrice(night) * ECONOMY.sellRatio);
+export function ballsToCash(balls: number, night: number, sellScale = 1): number {
+  return Math.floor(balls * ballPrice(night) * ECONOMY.sellRatio * sellScale);
 }
 
 // 現金不夠買一整包時，有多少買多少。
-export function buyBalls(cash: number, night: number): { balls: number; cost: number } {
-  const unit = ballPrice(night);
+export function buyBalls(cash: number, night: number, priceScale = 1): { balls: number; cost: number } {
+  const unit = Math.ceil(ballPrice(night) * priceScale);
   const balls = Math.min(ECONOMY.buyBalls, Math.floor(cash / unit));
   return { balls, cost: balls * unit };
 }
@@ -69,10 +74,21 @@ export interface RunState {
   level: number;
   best: number;
   bossWins: number;
+  today: Today | null;
+}
+
+// 這一晚抽到的籤和事件。存起來，重新整理才不能重抽。
+export interface Today {
+  fortune: number;
+  event: number | null;
+  chosen: boolean;
+  result: string;
+  mods: NightMods;
+  repay: number;
 }
 
 export function newRun(best = 0): RunState {
-  return { night: 1, cash: ECONOMY.startCash, level: 1, best, bossWins: 0 };
+  return { night: 1, cash: ECONOMY.startCash, level: 1, best, bossWins: 0, today: null };
 }
 
 export interface Settlement {
@@ -84,9 +100,9 @@ export interface Settlement {
   bankrupt: boolean;
 }
 
-export function settle(cash: number, balls: number, night: number, { bonus = 0, penalty = 0 }: { bonus?: number; penalty?: number } = {}): Settlement {
-  const earned = ballsToCash(balls, night);
-  const rent = rentForNight(night);
+export function settle(cash: number, balls: number, night: number, { bonus = 0, penalty = 0, rentScale = 1, sellScale = 1 }: { bonus?: number; penalty?: number; rentScale?: number; sellScale?: number } = {}): Settlement {
+  const earned = ballsToCash(balls, night, sellScale);
+  const rent = Math.round(rentForNight(night) * rentScale);
   const total = cash + earned + bonus;
   const due = rent + penalty;
   return { rent, earned, bonus, penalty, cashAfter: Math.max(0, total - due), bankrupt: total < due };

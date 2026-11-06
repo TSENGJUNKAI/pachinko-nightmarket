@@ -17,7 +17,7 @@ export const BOSS_DAMAGE: Record<BossHit, number> = {
   final: 100,
 };
 
-const BOSS_NAMES = ['金牙虎哥', '鐵算盤阿姨', '夜市大仔'];
+export const BOSS_NAMES = ['金牙虎哥', '鐵算盤阿姨', '夜市大仔'];
 
 export interface Boss {
   name: string;

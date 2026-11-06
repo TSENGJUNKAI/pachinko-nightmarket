@@ -17,16 +17,41 @@
           <div id="stall-panel">
             <div id="stall-head">
               <span id="stall-title"></span>
+              <span>名氣 <b id="stall-fame">0</b></span>
               <span>攤位 Lv.<b id="stall-level">1</b>　大獎出珠 <b id="stall-scale">×1.0</b></span>
             </div>
             <button id="upgrade" type="button"></button>
             <p id="next-rent"></p>
             <p id="boss-note" hidden></p>
+            <div id="machine-row" role="group" aria-label="選擇機台"></div>
+            <p id="machine-desc"></p>
+            <div id="fortune-box" hidden>
+              <b id="fortune-rank"></b>
+              <p id="fortune-verse"></p>
+              <p id="fortune-effect"></p>
+            </div>
+            <div id="event-box" hidden>
+              <b id="event-title"></b>
+              <p id="event-text"></p>
+              <div id="event-options"></div>
+            </div>
           </div>
           <button id="open-night" type="button"></button>
-          <button id="restart" type="button"></button>
+          <div id="screen-links">
+            <button id="open-book" type="button"></button>
+            <button id="restart" type="button"></button>
+          </div>
         </div>
       </section>
+      <section id="book" aria-label="演出圖鑑" hidden>
+        <div id="book-card">
+          <h2>演出圖鑑 <span id="book-count"></span></h2>
+          <p id="book-hint"></p>
+          <div id="book-groups"></div>
+          <button id="close-book" type="button">關閉</button>
+        </div>
+      </section>
+      <div id="toast" role="status" hidden></div>
     </div>
     <section id="controls" aria-label="遊戲操作">
       <div id="stats" aria-live="polite">
@@ -36,6 +61,7 @@
         <span>珠子 <b id="stat-balls">0</b></span>
         <span>地頭費 <b id="stat-rent">0</b></span>
         <span>Lv.<b id="stat-level">1</b></span>
+        <span id="night-mods"></span>
       </div>
       <div id="actions">
         <button id="fire" type="button"><span id="fire-label">發射！</span><small id="fire-hint">按住連發・空白鍵</small></button>
@@ -52,6 +78,8 @@
             <option value="comeback">沒中後復活</option>
             <option value="superHit">三聖筊必中，RUSH 連莊 2 次</option>
             <option value="rushFinal">RUSH 一路走到廟口</option>
+            <option value="golden">金色阿公</option>
+            <option value="announce">一發告知</option>
           </select>
           <div id="night-buttons">
             <button id="buy" type="button">買100珠<small id="buy-cost">−400 元</small></button>
